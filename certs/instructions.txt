@@ -1,0 +1,3 @@
+https://deliciousbrains.com/ssl-certificate-authority-for-local-https-development/
+
+https://stackoverflow.com/questions/43665243/invalid-self-signed-ssl-cert-subject-alternative-name-missing/43665244#43665244
