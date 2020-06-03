@@ -20,6 +20,6 @@ fn main() {
         ),
     ])
     .unwrap();
-    let mut input = InputLoop::new(String::from("127.0.0.1:5000"));
+    let mut input = InputLoop::new(String::from("127.0.0.1:50000"));
     input.start();
 }

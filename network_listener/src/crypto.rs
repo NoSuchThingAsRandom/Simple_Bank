@@ -4,10 +4,10 @@ use std::net::Shutdown;
 use std::sync::Arc;
 
 use log::{error, info, trace, warn};
-use rustls::{Certificate, NoClientAuth, RootCertStore, ServerConfig, TLSError};
+use rustls::{NoClientAuth, RootCertStore, ServerConfig, TLSError};
 
+use crate::client_handler::Client;
 use crate::Message;
-use crate::network::Client;
 
 pub struct TlsServer {
     listener: mio::net::TcpListener,
@@ -20,7 +20,12 @@ impl TlsServer {
         //TODO Need to provide client cert authentication
         warn!("Need to do client verification");
         let mut config = ServerConfig::new(client_verifier);
-        config.set_single_cert(load_certs("../certs/cert/my_cert.crt"), load_private_key("../certs/cert/priv.key")).unwrap();
+        config
+            .set_single_cert(
+                load_certs("../certs/cert/my_cert.crt"),
+                load_private_key("../certs/cert/priv.key"),
+            )
+            .unwrap();
         TlsServer {
             listener: socket,
             config: Arc::new(config),
@@ -42,7 +47,10 @@ pub struct TlsConnection {
 }
 
 impl TlsConnection {
-    pub fn new(socket: mio::net::TcpStream, tls_session: Box<dyn rustls::Session>) -> TlsConnection {
+    pub fn new(
+        socket: mio::net::TcpStream,
+        tls_session: Box<dyn rustls::Session>,
+    ) -> TlsConnection {
         TlsConnection {
             socket,
             tls_session,
@@ -56,7 +64,10 @@ impl TlsConnection {
                 if n == 0 {
                     warn!("No data read from socket");
                     self.closing = true;
-                    return Err(Box::from(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "No data has been read")));
+                    return Err(Box::from(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "No data has been read",
+                    )));
                 } else {
                     let processed = self.tls_session.process_new_packets();
                     match processed {
@@ -76,7 +87,10 @@ impl TlsConnection {
         }
         Ok(())
     }
-    pub fn read_plaintext(&mut self, buffer: &mut [u8]) -> Result<usize, Box<dyn std::error::Error>> {
+    pub fn read_plaintext(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> Result<usize, Box<dyn std::error::Error>> {
         self.read_tls()?;
         Ok(self.tls_session.read(buffer)?)
     }
@@ -101,7 +115,13 @@ impl TlsConnection {
         while self.tls_session.wants_write() {
             written_bytes += self.tls_session.write_tls(&mut self.socket)?;
         }
-        info!("Sent message {} to {}, with {} out of {} bytes sent", msg, self.socket.peer_addr()?, written_bytes, size + 2);
+        info!(
+            "Sent message {} to {}, with {} out of {} bytes sent",
+            msg,
+            self.socket.peer_addr()?,
+            written_bytes,
+            size + 2
+        );
         Ok(())
     }
     pub fn shutdown(&mut self) -> Result<(), Error> {
@@ -110,8 +130,7 @@ impl TlsConnection {
 }
 
 fn load_private_key(filename: &str) -> rustls::PrivateKey {
-    let keyfile = fs::File::open(filename)
-        .expect("cannot open private key file");
+    let keyfile = fs::File::open(filename).expect("cannot open private key file");
     let mut reader = BufReader::new(keyfile);
     let key = rustls::internal::pemfile::rsa_private_keys(&mut reader)
         .expect("file contains invalid rsa private key");

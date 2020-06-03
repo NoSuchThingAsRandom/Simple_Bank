@@ -1,0 +1,15 @@
+[package]
+name = "network_listener"
+version = "0.1.0"
+authors = ["Sam <a>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4.8"
+uuid="0.8"
+rand = "0.7.3"
+simplelog = "0.8.0"
+rustls = "0.17.0"
+mio = {version="0.7.0",features=["os-poll","tcp"]}
