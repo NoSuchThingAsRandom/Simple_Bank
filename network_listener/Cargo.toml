@@ -13,3 +13,4 @@ rand = "0.7.3"
 simplelog = "0.8.0"
 rustls = "0.17.0"
 mio = {version="0.7.0",features=["os-poll","tcp"]}
+webpki = "0.21.3"

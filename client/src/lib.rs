@@ -24,20 +24,6 @@ use crate::network::{ServerConn, MAX_MESSAGE_BYTES};
 
 pub mod network;
 
-#[derive(Clone, PartialEq)]
-pub enum MessageOptions {
-    Shutdown,
-    None,
-}
-
-#[derive(Clone)]
-pub struct Message {
-    pub(crate) data: String,
-    pub sender: String,
-    pub recipient: String,
-    pub options: MessageOptions,
-}
-
 impl Message {
     pub fn new(data: String) -> Result<Message, std::io::Error> {
         if data.as_bytes().len() > MAX_MESSAGE_BYTES as usize {

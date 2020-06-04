@@ -63,7 +63,7 @@ impl NetworkWorker {
 
     ///Mio poll for incoming connections and distributing outgoing messages to correct client_io thread
     pub fn start(&mut self, address: String, messages_out: Receiver<Message>) {
-        info!("Starting listening server on {}", address);
+        info!("Starting listening load_balancer on {}", address);
         let mut poll = Poll::new().unwrap();
         let mut events = Events::with_capacity(128);
         let mut tcp_listener = mio::net::TcpListener::bind(address.parse().unwrap()).unwrap();

@@ -101,6 +101,7 @@ impl TlsConnection {
         }
         Ok(())
     }
+
     pub fn write_message(&mut self, msg: &Message) -> Result<(), Box<dyn std::error::Error>> {
         let data = msg.data.as_bytes();
         let size = data.len() as u16;

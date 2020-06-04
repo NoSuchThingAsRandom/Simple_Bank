@@ -1,5 +1,5 @@
 [package]
-name = "server"
+name = "load_balancer"
 version = "0.1.0"
 authors = ["Sam <a>"]
 edition = "2018"
@@ -17,3 +17,4 @@ futures="0.3"
 mio = {version="0.7.0",features=["os-poll","tcp"]}
 chrono = "0.4.11"
 webpki = "0.21.3"
+network_listener={path="../network_listener"}

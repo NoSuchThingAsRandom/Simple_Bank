@@ -11,6 +11,7 @@ use std::time::Duration;
 use std::{fmt, io, thread};
 
 use log::{error, info, trace, warn};
+use network_listener::Message;
 use rustls::ClientConfig;
 use strum::EnumMessage;
 use strum::IntoEnumIterator;
@@ -20,23 +21,7 @@ use strum_macros::EnumMessage;
 use strum_macros::EnumString;
 use text_io::read;
 
-use crate::crypto::TlsConnection;
-use crate::network::{Client, Network, MAX_MESSAGE_BYTES};
-
 pub mod data_handler;
-#[derive(Clone, PartialEq)]
-pub enum MessageOptions {
-    Shutdown,
-    None,
-}
-
-#[derive(Clone)]
-pub struct Message {
-    pub(crate) data: String,
-    pub sender: String,
-    pub recipient: String,
-    pub options: MessageOptions,
-}
 
 #[derive(EnumIter, EnumString, EnumMessage, Debug, AsRefStr)]
 enum Commands {

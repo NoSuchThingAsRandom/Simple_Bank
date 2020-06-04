@@ -33,7 +33,7 @@ fn test_check_messages_bench(&mut self) -> Vec<i64> {
 }
 
 pub fn test_multi_server_multi_client(&mut self) {
-    info!("Starting multi client multi server test");
+    info!("Starting multi client multi load_balancer test");
     // Test consts
     const NUM_THREADS: u32 = 10;
     const NUM_INSTANCES: u32 = 120;
@@ -134,7 +134,7 @@ pub fn test_multi_server_multi_client(&mut self) {
 }
 
 pub fn test_single_server_multi_client(&mut self) {
-    info!("Starting multi client multi server test");
+    info!("Starting multi client multi load_balancer test");
     // Test consts
     const NUM_THREADS: u32 = 10;
     const NUM_INSTANCES: u32 = 120;
@@ -199,7 +199,7 @@ pub fn test_single_server_multi_client(&mut self) {
         threads.push(thread::spawn(move || {
             let mut host = String::from("127.0.0.1:");
             host.push_str((PORT).to_string().as_str());
-            //Connect to server
+            //Connect to load_balancer
             for sub_state in &mut state {
                 match sub_state.connect(host.clone()) {
                     Some(c) => {

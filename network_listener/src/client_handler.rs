@@ -5,11 +5,9 @@ use std::collections::HashMap;
 use std::sync::mpsc::*;
 
 use log::{error, info, trace, warn};
-use mio::Events;
-use std::time::Duration;
-
-use mio::{Interest, Poll, Token};
+use mio::{Events, Interest, Poll, Token};
 use rand::{RngCore, SeedableRng};
+use std::time::Duration;
 use uuid::{Builder, Uuid, Variant, Version};
 
 //pub(crate) const ADDR: &str = "127.0.0.1:5962";
@@ -30,23 +28,12 @@ impl Client {
     pub fn new(addr: String, tls: TlsConnection) -> Client {
         Client {
             addr,
-            uuid: Client::new_secure_uuid_v4(),
+            uuid: Message::new_secure_uuid_v4(),
             client_buffer: Vec::new(),
             tls,
         }
     }
 
-    fn new_secure_uuid_v4() -> Uuid {
-        let mut rng = rand::rngs::StdRng::from_entropy();
-        let mut bytes = [0; 16];
-
-        rng.fill_bytes(&mut bytes);
-
-        Builder::from_bytes(bytes)
-            .set_variant(Variant::RFC4122)
-            .set_version(Version::Random)
-            .build()
-    }
     ///Reads group of messages from a client
     fn read_data(&mut self) -> Result<Vec<Message>, Box<dyn std::error::Error>> {
         trace!("Reading data from socket {}", self.addr);

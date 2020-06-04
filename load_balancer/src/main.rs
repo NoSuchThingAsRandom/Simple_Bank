@@ -1,8 +1,11 @@
-use server::InputLoop;
 use simplelog::{
     CombinedLogger, ConfigBuilder, LevelFilter, TermLogger, TerminalMode, WriteLogger,
 };
 use std::fs::File;
+
+fn test() {
+    Client::start(String::from("Test"));
+}
 
 fn main() {
     let mut config = ConfigBuilder::new();
@@ -18,6 +21,7 @@ fn main() {
         ),
     ])
     .unwrap();
+    test();
     /*let mut input_loop = InputLoop::new(String::from("127.0.0.1:50000"));
     input_loop.start();*/
 }
