@@ -1,20 +1,18 @@
 mod client_handler;
 mod crypto;
-pub mod messages_request;
 mod network_worker;
+pub mod protos;
 mod server_connection;
 
-use log::{error, info, trace, warn};
+use crate::protos::message::{Request, Request_RequestType};
 
-use crate::messages_request::asd::request::{
-    AccountType, AuthenticateType, DetailedType, MiscType, RequestType, TransactionType,
-};
-use crate::messages_request::asd::Request;
-use rand::{RngCore, SeedableRng};
 use std::fmt::Formatter;
 use std::net::Shutdown::Read;
 use std::sync::mpsc::{channel, Receiver, SendError, Sender};
 use std::{fmt, thread};
+
+use log::{error, info, trace, warn};
+use rand::{RngCore, SeedableRng};
 use uuid::{Builder, Uuid, Variant, Version};
 
 pub const ADDRESS: &str = "127.0.0.1";
@@ -27,31 +25,33 @@ const MAX_CLIENTS_THREAD: u8 = 20;
 const MAX_MESSAGE_BYTES: u16 = 65535;
 
 impl Request {
-    pub fn new(data: String, client: Uuid, from_client: bool) -> Result<Request, std::io::Error> {
-        if data.as_bytes().len() > MAX_MESSAGE_BYTES as usize {
-            unimplemented!(
-                "message data is too big!\nmessage bytes {}",
-                data.as_bytes().len()
-            )
-        }
+    pub fn new_from_fields(
+        data: Vec<String>,
+        client: Uuid,
+        from_client: bool,
+    ) -> Result<Request, std::io::Error> {
         let message = Request {
-            r#type: RequestType::Misc as i32,
-            user_id: "".to_string(),
+            field_type: Default::default(),
+            user_id: Default::default(),
             client_id: client.to_string(),
-            data: vec![data],
+            data: protobuf::RepeatedField::from_vec(data),
             from_client,
-            detailed_type: Option::from(messages_request::asd::request::DetailedType::Misc(1)),
+            detailed_type: Default::default(),
+            unknown_fields: protobuf::UnknownFields::new(),
+            cached_size: Default::default(),
         };
         Ok(message)
     }
     pub fn shutdown() -> Request {
         Request {
-            r#type: RequestType::Shutdown as i32,
+            field_type: Request_RequestType::SHUTDOWN,
             user_id: "".to_string(),
             client_id: "".to_string(),
-            data: Vec::new(),
+            data: Default::default(),
             from_client: false,
             detailed_type: None,
+            unknown_fields: Default::default(),
+            cached_size: Default::default(),
         }
     }
     pub fn new_secure_uuid_v4() -> Uuid {
@@ -168,7 +168,7 @@ impl Server {
         for msg in self.messages_in.try_iter() {
             //TODO Check if it is a new client
             warn!("Checking for client, using incorrect methiods");
-            if msg.r#type == RequestType::Authenticate as i32 {
+            if msg.field_type == Request_RequestType::AUTHENTICATE {
                 //if msg.detailed_type == MessageOptions::NewClient {
                 self.connections.push(msg.client_id.parse().unwrap());
             } else {
@@ -182,7 +182,7 @@ impl Server {
         for msg in self.messages_in.iter() {
             //TODO Check if it is a new client
             warn!("Checking for client, using incorrect methiods");
-            if msg.r#type == RequestType::Authenticate as i32 {
+            if msg.field_type == Request_RequestType::AUTHENTICATE {
                 self.connections.push(msg.client_id.parse().unwrap());
             } else {
                 messages.push(msg);

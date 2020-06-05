@@ -1,7 +1,7 @@
 use log::{error, info, trace, warn};
 
 use network_listener::{
-    messages_request::asd::Request, Client, ADDRESS, DATA_ACCOUNTS_PORT, DATA_MISC_PORT,
+    protos::message::Request, Client, ADDRESS, DATA_ACCOUNTS_PORT, DATA_MISC_PORT,
     DATA_TRANSACTIONS_PORT, LOAD_BALANCER_PORT,
 };
 use std::sync::atomic::Ordering::AcqRel;

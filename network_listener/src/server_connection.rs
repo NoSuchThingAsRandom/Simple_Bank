@@ -5,8 +5,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::messages_request::asd::request::RequestType;
-use crate::messages_request::asd::Request;
+use crate::protos::message::{Request, Request_RequestType};
 use log::{error, info, trace, warn};
 use mio::{Events, Interest, Poll, Token};
 use rustls::ClientConfig;
@@ -99,7 +98,7 @@ impl ServerConn {
             //Send messages
             let mut messages: Vec<Request> = outgoing_message.try_iter().collect();
             messages.retain(|msg| {
-                if msg.r#type == RequestType::Shutdown as i32 {
+                if msg.field_type == Request_RequestType::SHUTDOWN {
                     shutdown = true;
                     false
                 } else {
@@ -107,7 +106,7 @@ impl ServerConn {
                     match self.tls.write_message(msg) {
                         Ok(_) => false,
                         Err(e) => {
-                            error!("Failed to send message ({}), ({})", msg, e);
+                            error!("Failed to send message ({:?}), ({})", msg, e);
                             true
                         }
                     }
@@ -115,7 +114,7 @@ impl ServerConn {
             });
 
             for msg in messages {
-                warn!("Failed to send {}", msg);
+                warn!("Failed to send {:?}", msg);
             }
         }
         info!("Starting shutdown of IO thread");
@@ -126,7 +125,7 @@ impl ServerConn {
             match self.read_data() {
                 Ok(message) => {
                     for msg in message {
-                        println!("Got {}", msg);
+                        println!("Got {:?}", msg);
                         if let Err(e) = incoming_messages.send(msg) {
                             error!("Send message to user thread failed {}", e);
                         }
@@ -185,14 +184,8 @@ impl ServerConn {
             );
             if buffer.len() >= data_size as usize {
                 let (msg_bytes, remaining_bytes) = buffer.split_at(data_size as usize).clone();
-
-                let msg = Request::new(
-                    String::from_utf8(msg_bytes.to_vec()).expect("Invalid utf-8 received"),
-                    self.uuid,
-                    false,
-                )
-                .unwrap();
-                trace!("Received {}", msg);
+                let msg: Request = protobuf::parse_from_bytes(msg_bytes).unwrap();
+                trace!("Received {:?}", msg);
                 messages.push(msg);
                 self.client_buffer = remaining_bytes.to_vec();
             } else {

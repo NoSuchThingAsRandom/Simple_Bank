@@ -4,9 +4,9 @@ use std::net::Shutdown;
 use std::sync::Arc;
 
 use crate::client_handler::Client;
-use crate::messages_request::asd::Request;
-use bytes::BytesMut;
+use crate::protos::message::Request;
 use log::{error, info, trace, warn};
+use protobuf::Message;
 use rustls::{NoClientAuth, RootCertStore, ServerConfig, TLSError};
 
 pub struct TlsServer {
@@ -104,14 +104,12 @@ impl TlsConnection {
 
     pub fn write_message(&mut self, msg: &Request) -> Result<(), Box<dyn std::error::Error>> {
         //let mut buffer = None;
-        let mut buffer = BytesMut::with_capacity(1024);
-        msg.encode_length_delimeted(buffer);
-        let data = msg.data.get(0).unwrap().as_bytes();
-        let size = data.len() as u16;
+        let mut buffer = msg.write_length_delimited_to_bytes().unwrap();
+        let size = buffer.len() as u16;
         let size_bytes = size.to_be_bytes();
 
         self.tls_session.write(&size_bytes)?;
-        let buffer_bytes = self.tls_session.write(data)?;
+        let buffer_bytes = self.tls_session.write(buffer.as_ref())?;
         self.tls_session.flush()?;
         let mut written_bytes = self.tls_session.write_tls(&mut self.socket)?;
         trace!("Put {} out of {} in buffer", buffer_bytes, size);
@@ -120,7 +118,7 @@ impl TlsConnection {
             written_bytes += self.tls_session.write_tls(&mut self.socket)?;
         }
         info!(
-            "Sent message {} to {}, with {} out of {} bytes sent",
+            "Sent message {:?} to {}, with {} out of {} bytes sent",
             msg,
             self.socket.peer_addr()?,
             written_bytes,

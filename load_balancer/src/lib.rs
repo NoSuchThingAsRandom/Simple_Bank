@@ -23,7 +23,8 @@ use strum_macros::EnumString;
 use text_io::read;
 
 pub mod data_handler;
-use network_listener::messages_request::asd::Request;
+
+use network_listener::protos::message::Request;
 
 #[derive(EnumIter, EnumString, EnumMessage, Debug, AsRefStr)]
 enum Commands {
@@ -160,7 +161,7 @@ impl InputLoop {
         for msg in self.messages_in_receiver.try_iter() {
             for client in &mut self.clients {
                 if client.addr == msg.client_id.to_string() {
-                    println!("{}", msg);
+                    println!("{:?}", msg);
                     client.messages.push(msg.clone());
                 }
             }
@@ -213,12 +214,16 @@ impl InputLoop {
         }
     }
 
-    fn send_message(&mut self, client_name: String, msg_data: String) -> bool {
+    fn send_message(&mut self, client_name: String, msg_data_str: String) -> bool {
         println!("Attempting to send message to {}", client_name);
         for client in &mut self.clients {
             if client.addr == client_name {
                 trace!("Making message request to {}", &client);
-                return match Request::new(msg_data, Request::new_secure_uuid_v4(), false) {
+                return match Request::new_from_fields(
+                    Vec::new(),
+                    Request::new_secure_uuid_v4(),
+                    false,
+                ) {
                     Ok(msg) => {
                         if self.messages_out_sender.send(msg).is_err() {
                             error!("Failed to send message to networking thread");

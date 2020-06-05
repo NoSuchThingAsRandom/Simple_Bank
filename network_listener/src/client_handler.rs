@@ -1,11 +1,10 @@
-use crate::crypto::{TlsConnection, TlsServer};
+use crate::crypto::TlsConnection;
 //use crate::{Message, MessageOptions};
 
 use std::collections::HashMap;
 use std::sync::mpsc::*;
 
-use crate::messages_request::asd::request::RequestType;
-use crate::messages_request::asd::Request;
+use crate::protos::message::{Request, Request_RequestType};
 use log::{error, info, trace, warn};
 use mio::{Events, Interest, Poll, Token};
 use rand::{RngCore, SeedableRng};
@@ -77,14 +76,8 @@ impl Client {
             );
             if buffer.len() >= data_size as usize {
                 let (msg_bytes, remaining_bytes) = buffer.split_at(data_size as usize).clone();
-
-                let msg = Request::new(
-                    String::from_utf8(msg_bytes.to_vec()).expect("Invalid utf-8 received"),
-                    self.uuid,
-                    true,
-                )
-                .unwrap();
-                trace!("Received {}", msg);
+                let msg: Request = protobuf::parse_from_bytes(msg_bytes).unwrap();
+                trace!("Received {:?}", msg);
                 messages.push(msg);
                 self.client_buffer = remaining_bytes.to_vec();
             } else {
@@ -139,7 +132,7 @@ impl ClientIo {
             let mut messages: Vec<Request> = self.messages_out.try_iter().collect();
             for client in self.clients.values_mut() {
                 messages.retain(|msg| {
-                    if msg.r#type == RequestType::Shutdown as i32 {
+                    if msg.get_field_type() == Request_RequestType::SHUTDOWN {
                         shutdown = true;
                         false
                     } else {
@@ -147,7 +140,7 @@ impl ClientIo {
                             match client.tls.write_message(msg) {
                                 Ok(_) => false,
                                 Err(e) => {
-                                    error!("Failed to send message ({}), ({})", msg, e);
+                                    error!("Failed to send message ({:?}), ({})", msg, e);
                                     true
                                 }
                             }
@@ -158,7 +151,7 @@ impl ClientIo {
                 });
             }
             for msg in messages {
-                warn!("Failed to send {}", msg);
+                warn!("Failed to send {:?}", msg);
             }
 
             //Check for incoming messages
@@ -203,7 +196,7 @@ impl ClientIo {
                 let messages = client.read_data();
                 if messages.is_ok() {
                     for msg in messages.unwrap() {
-                        println!("Got {}", msg);
+                        println!("Got {:?}", msg);
                         match self.messages_in.send(msg) {
                             Ok(_) => {}
                             Err(e) => {

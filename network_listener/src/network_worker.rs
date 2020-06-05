@@ -7,8 +7,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
-use crate::messages_request::asd::request::RequestType;
-use crate::messages_request::asd::Request;
+use crate::protos::message::{Request, Request_RequestType};
 use log::{error, info, trace, warn};
 use mio::{Events, Interest, Poll, Token};
 use uuid::Uuid;
@@ -90,7 +89,7 @@ impl NetworkWorker {
                 }
             }
             for msg in messages_out.try_iter() {
-                if msg.r#type == RequestType::Shutdown as i32 {
+                if msg.field_type == Request_RequestType::SHUTDOWN {
                     for shutdown in &mut self.client_io_shutdown_senders {
                         shutdown
                             .send(Request::shutdown())

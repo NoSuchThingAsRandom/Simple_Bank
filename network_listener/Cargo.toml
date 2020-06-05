@@ -6,7 +6,8 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [build-dependencies]
-prost-build = "0.6.1"
+protobuf-codegen-pure = "2.14.0"
+
 
 [dependencies]
 log = "0.4.8"
@@ -16,7 +17,4 @@ simplelog = "0.8.0"
 rustls = "0.17.0"
 mio = {version="0.7.0",features=["os-poll","tcp"]}
 webpki = "0.21.3"
-prost = "0.6.1"
-
-prost-derive = "0.6.1"
-bytes = "0.5.4"
+protobuf = "2.14.0"
