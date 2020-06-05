@@ -1,16 +1,23 @@
 mod client_handler;
 mod crypto;
+pub mod messages_request;
 mod network_worker;
 mod server_connection;
 
 use log::{error, info, trace, warn};
 
+use crate::messages_request::asd::request::{
+    AccountType, AuthenticateType, DetailedType, MiscType, RequestType, TransactionType,
+};
+use crate::messages_request::asd::Request;
 use rand::{RngCore, SeedableRng};
 use std::fmt::Formatter;
+use std::net::Shutdown::Read;
 use std::sync::mpsc::{channel, Receiver, SendError, Sender};
 use std::{fmt, thread};
 use uuid::{Builder, Uuid, Variant, Version};
 
+pub const ADDRESS: &str = "127.0.0.1";
 pub const DATA_MISC_PORT: &str = "49700";
 pub const DATA_TRANSACTIONS_PORT: &str = "49800";
 pub const DATA_ACCOUNTS_PORT: &str = "49900";
@@ -19,43 +26,32 @@ pub const LOAD_BALANCER_PORT: &str = "50000";
 const MAX_CLIENTS_THREAD: u8 = 20;
 const MAX_MESSAGE_BYTES: u16 = 65535;
 
-#[derive(Clone, PartialEq)]
-pub enum MessageOptions {
-    NewClient,
-    Shutdown,
-    None,
-}
-
-#[derive(Clone)]
-pub struct Message {
-    pub(crate) data: String,
-    pub client: Uuid,
-    pub from_client: bool,
-    pub options: MessageOptions,
-}
-
-impl Message {
-    pub fn new(data: String, client: Uuid, from_client: bool) -> Result<Message, std::io::Error> {
+impl Request {
+    pub fn new(data: String, client: Uuid, from_client: bool) -> Result<Request, std::io::Error> {
         if data.as_bytes().len() > MAX_MESSAGE_BYTES as usize {
             unimplemented!(
-                "Message data is too big!\nMessage bytes {}",
+                "message data is too big!\nmessage bytes {}",
                 data.as_bytes().len()
             )
         }
-        let message = Message {
-            data,
-            client,
+        let message = Request {
+            r#type: RequestType::Misc as i32,
+            user_id: "".to_string(),
+            client_id: client.to_string(),
+            data: vec![data],
             from_client,
-            options: MessageOptions::None,
+            detailed_type: Option::from(messages_request::asd::request::DetailedType::Misc(1)),
         };
         Ok(message)
     }
-    pub fn shutdown() -> Message {
-        Message {
-            data: "".to_string(),
-            client: Default::default(),
-            options: MessageOptions::Shutdown,
+    pub fn shutdown() -> Request {
+        Request {
+            r#type: RequestType::Shutdown as i32,
+            user_id: "".to_string(),
+            client_id: "".to_string(),
+            data: Vec::new(),
             from_client: false,
+            detailed_type: None,
         }
     }
     pub fn new_secure_uuid_v4() -> Uuid {
@@ -71,6 +67,23 @@ impl Message {
     }
 }
 
+/*
+#[derive(Clone, PartialEq)]
+pub enum MessageOptions {
+    NewClient,
+    Shutdown,
+    None,
+}
+
+#[derive(Clone)]
+pub struct message {
+    pub data: String,
+    pub client: Uuid,
+    pub from_client: bool,
+    pub options: MessageOptions,
+}*/
+
+/*
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if self.from_client {
@@ -90,12 +103,13 @@ impl fmt::Display for Message {
         }
     }
 }
+*/
 
 /// Initiation struct for network worker and holding all publicly accessible variables
 pub struct Server {
-    connections: Vec<Uuid>,
-    messages_in: Receiver<Message>,
-    messages_out: Sender<Message>,
+    pub connections: Vec<Uuid>,
+    messages_in: Receiver<Request>,
+    messages_out: Sender<Request>,
     //TODO Change from string representation
     clients_in: Receiver<Uuid>,
 }
@@ -110,6 +124,7 @@ impl Server {
     ///     messages_out: To send incoming messages to the user thread
     ///
     pub fn init(address: String) -> Server {
+        //TODO Create client authentication for backend servers and load_balancers
         info!("Creating listening handler");
         let (messages_in_sender, messages_in_receiver) = channel();
         let (client_in_sender, client_in_receiver) = channel();
@@ -141,29 +156,34 @@ impl Server {
     pub fn list_clients(&mut self) -> Vec<Uuid> {
         self.connections.clone()
     }
-    pub fn send_message(&mut self, msg: Message) -> Result<(), SendError<Message>> {
+    pub fn send_message(&mut self, msg: Request) -> Result<(), SendError<Request>> {
         self.messages_out.send(msg)
     }
 
-    pub fn shutdown(&mut self) -> Result<(), SendError<Message>> {
-        self.messages_out.send(Message::shutdown())
+    pub fn shutdown(&mut self) -> Result<(), SendError<Request>> {
+        self.messages_out.send(Request::shutdown())
     }
-    pub fn get_messages(&mut self) -> Vec<Message> {
+    pub fn get_messages(&mut self) -> Vec<Request> {
         let mut messages = Vec::new();
         for msg in self.messages_in.try_iter() {
-            if msg.options == MessageOptions::NewClient {
-                self.connections.push(msg.data.parse().unwrap());
+            //TODO Check if it is a new client
+            warn!("Checking for client, using incorrect methiods");
+            if msg.r#type == RequestType::Authenticate as i32 {
+                //if msg.detailed_type == MessageOptions::NewClient {
+                self.connections.push(msg.client_id.parse().unwrap());
             } else {
                 messages.push(msg);
             }
         }
         messages
     }
-    pub fn get_messages_blocking(&mut self) -> Vec<Message> {
+    pub fn get_messages_blocking(&mut self) -> Vec<Request> {
         let mut messages = Vec::new();
         for msg in self.messages_in.iter() {
-            if msg.options == MessageOptions::NewClient {
-                self.connections.push(msg.data.parse().unwrap());
+            //TODO Check if it is a new client
+            warn!("Checking for client, using incorrect methiods");
+            if msg.r#type == RequestType::Authenticate as i32 {
+                self.connections.push(msg.client_id.parse().unwrap());
             } else {
                 messages.push(msg);
             }
@@ -174,9 +194,9 @@ impl Server {
 
 pub struct Client {
     pub addr: String,
-    pub messages: Vec<Message>,
-    messages_in: Receiver<Message>,
-    messages_out: Sender<Message>,
+    pub messages: Vec<Request>,
+    messages_in: Receiver<Request>,
+    messages_out: Sender<Request>,
 }
 
 impl Client {
@@ -195,14 +215,14 @@ impl Client {
             messages_out: outgoing_messages_out,
         }
     }
-    pub fn get_messages(&mut self) -> Vec<Message> {
+    pub fn get_messages(&mut self) -> Vec<Request> {
         self.messages_in.try_iter().collect()
     }
 
-    pub fn get_message_blocking(&mut self) -> Vec<Message> {
+    pub fn get_message_blocking(&mut self) -> Vec<Request> {
         self.messages_in.iter().collect()
     }
-    pub fn send_message(&mut self, message: Message) -> Result<(), SendError<Message>> {
+    pub fn send_message(&mut self, message: Request) -> Result<(), SendError<Request>> {
         self.messages_out.send(message)
     }
 }

@@ -1,3 +1,4 @@
+extern crate network_listener;
 extern crate strum;
 extern crate strum_macros;
 
@@ -11,8 +12,8 @@ use std::time::Duration;
 use std::{fmt, io, thread};
 
 use log::{error, info, trace, warn};
-use network_listener::Message;
 use rustls::ClientConfig;
+use std::net::Shutdown::Read;
 use strum::EnumMessage;
 use strum::IntoEnumIterator;
 use strum_macros::AsRefStr;
@@ -22,6 +23,7 @@ use strum_macros::EnumString;
 use text_io::read;
 
 pub mod data_handler;
+use network_listener::messages_request::asd::Request;
 
 #[derive(EnumIter, EnumString, EnumMessage, Debug, AsRefStr)]
 enum Commands {
@@ -35,7 +37,7 @@ enum Commands {
         detailed_message = "This displays all current connections"
     )]
     List,
-    #[strum(message = "Message", detailed_message = "This sends a message")]
+    #[strum(message = "message", detailed_message = "This sends a message")]
     Message,
     #[strum(message = "Exit", detailed_message = "This exits the program")]
     Exit,
@@ -52,7 +54,7 @@ impl Commands {
                     command.get_message().unwrap_or(command.as_ref()),
                     command
                         .get_detailed_message()
-                        .unwrap_or("No Help Message :(")
+                        .unwrap_or("No Help message :(")
                 )
                 .as_ref(),
             );
@@ -74,7 +76,7 @@ impl Commands {
 
 struct ClientUser {
     addr: String,
-    messages: Vec<Message>,
+    messages: Vec<Request>,
     nickname: String,
 }
 
@@ -90,13 +92,14 @@ impl fmt::Display for ClientUser {
 
 pub struct InputLoop {
     user_client_receiver: Receiver<String>,
-    messages_in_receiver: Receiver<Message>,
-    messages_out_sender: Sender<Message>,
+    messages_in_receiver: Receiver<Request>,
+    messages_out_sender: Sender<Request>,
     clients: Vec<ClientUser>,
-    network_struct: Network,
+    //    network_struct: Network,
 }
 
 impl InputLoop {
+    /*
     pub fn new(address: String) -> InputLoop {
         let (user_client_sender, user_client_receiver) = channel();
         let (messages_in_sender, messages_in_receiver) = channel();
@@ -114,7 +117,9 @@ impl InputLoop {
             clients: Vec::new(),
             network_struct,
         }
-    }
+
+    */
+
     ///The main user input loop
     /// Responds to user input
     pub fn start(&mut self) {
@@ -154,7 +159,7 @@ impl InputLoop {
         info!("Updating messages");
         for msg in self.messages_in_receiver.try_iter() {
             for client in &mut self.clients {
-                if client.addr == msg.sender {
+                if client.addr == msg.client_id.to_string() {
                     println!("{}", msg);
                     client.messages.push(msg.clone());
                 }
@@ -166,8 +171,8 @@ impl InputLoop {
         let mut differences = Vec::new();
         for msg in self.messages_in_receiver.try_iter() {
             for client in &mut self.clients {
-                if client.addr == msg.sender {
-                    let time: Result<i64, <i64 as FromStr>::Err> = msg.data.parse();
+                if client.addr == msg.client_id.to_string() {
+                    let time: Result<i64, <i64 as FromStr>::Err> = msg.data.get(0).unwrap().parse();
                     match time {
                         Ok(t) => {
                             let rec_time: i64 = chrono::Utc::now().timestamp_millis();
@@ -176,7 +181,7 @@ impl InputLoop {
                             differences.push(rec_time - t);
                         }
                         Err(_) => {
-                            for fuck in msg.data.split_whitespace() {
+                            for fuck in msg.data.get(0).unwrap().split_whitespace() {
                                 let time: Result<i64, <i64 as FromStr>::Err> =
                                     fuck[0..fuck.len()].parse();
                                 if time.is_ok() {
@@ -213,7 +218,7 @@ impl InputLoop {
         for client in &mut self.clients {
             if client.addr == client_name {
                 trace!("Making message request to {}", &client);
-                return match Message::new(msg_data, client_name, String::from("ME")) {
+                return match Request::new(msg_data, Request::new_secure_uuid_v4(), false) {
                     Ok(msg) => {
                         if self.messages_out_sender.send(msg).is_err() {
                             error!("Failed to send message to networking thread");
@@ -223,7 +228,7 @@ impl InputLoop {
                         }
                     }
                     Err(_) => {
-                        println!("Message data is too big!");
+                        println!("message data is too big!");
                         false
                     }
                 };
@@ -234,7 +239,7 @@ impl InputLoop {
 
     pub fn shutdown(&mut self) {
         self.messages_out_sender
-            .send(Message::shutdown())
+            .send(Request::shutdown())
             .expect("Failed to send shutdown command");
     }
 }

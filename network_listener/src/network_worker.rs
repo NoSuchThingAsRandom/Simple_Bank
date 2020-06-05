@@ -1,12 +1,14 @@
 use crate::client_handler::{Client, ClientIo};
 use crate::crypto::TlsServer;
-use crate::{Message, MessageOptions, MAX_CLIENTS_THREAD};
+use crate::MAX_CLIENTS_THREAD;
 
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
+use crate::messages_request::asd::request::RequestType;
+use crate::messages_request::asd::Request;
 use log::{error, info, trace, warn};
 use mio::{Events, Interest, Poll, Token};
 use uuid::Uuid;
@@ -16,19 +18,19 @@ use uuid::Uuid;
 pub struct NetworkWorker {
     current_connection_count: u32,
     thread_count: u32,
-    client_map: HashMap<Uuid, Sender<Message>>,
-    client_io_shutdown_senders: Vec<Sender<Message>>,
+    client_map: HashMap<Uuid, Sender<Request>>,
+    client_io_shutdown_senders: Vec<Sender<Request>>,
     full_client_sender: Vec<Sender<Client>>,
     slave_client_sender: Sender<Client>,
-    slave_messages_out_sender: Sender<Message>,
-    master_messages_in: Sender<Message>,
+    slave_messages_out_sender: Sender<Request>,
+    master_messages_in: Sender<Request>,
     master_client_address: Sender<Uuid>,
 }
 
 impl NetworkWorker {
     pub fn init(
         master_client_in_sender: Sender<Uuid>,
-        master_messages_in_sender: Sender<Message>,
+        master_messages_in_sender: Sender<Request>,
     ) -> NetworkWorker {
         //Start io thread
         let (io_client_sender, io_client_receiver) = channel();
@@ -62,7 +64,7 @@ impl NetworkWorker {
     }
 
     ///Mio poll for incoming connections and distributing outgoing messages to correct client_io thread
-    pub fn start(&mut self, address: String, messages_out: Receiver<Message>) {
+    pub fn start(&mut self, address: String, messages_out: Receiver<Request>) {
         info!("Starting listening load_balancer on {}", address);
         let mut poll = Poll::new().unwrap();
         let mut events = Events::with_capacity(128);
@@ -88,17 +90,17 @@ impl NetworkWorker {
                 }
             }
             for msg in messages_out.try_iter() {
-                if msg.options == MessageOptions::Shutdown {
+                if msg.r#type == RequestType::Shutdown as i32 {
                     for shutdown in &mut self.client_io_shutdown_senders {
                         shutdown
-                            .send(Message::shutdown())
+                            .send(Request::shutdown())
                             .expect("Failed to send shutdown message");
                     }
                     info!("Closed listening thread");
                     return;
                 } else {
                     self.client_map
-                        .get_mut(&msg.client)
+                        .get_mut(&msg.client_id.parse().unwrap())
                         .unwrap()
                         .send(msg)
                         .expect("Failed to send message");

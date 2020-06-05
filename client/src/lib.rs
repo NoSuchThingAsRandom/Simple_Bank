@@ -28,7 +28,7 @@ impl Message {
     pub fn new(data: String) -> Result<Message, std::io::Error> {
         if data.as_bytes().len() > MAX_MESSAGE_BYTES as usize {
             unimplemented!(
-                "Message data is too big!\nMessage bytes {}",
+                "message data is too big!\nmessage bytes {}",
                 data.as_bytes().len()
             )
         }
@@ -54,7 +54,7 @@ impl fmt::Display for Message {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Message from: {}    To: {}    Contents: {}",
+            "message from: {}    To: {}    Contents: {}",
             self.sender, self.recipient, self.data
         )
     }
@@ -68,7 +68,7 @@ enum Commands {
     )]
     Update,
 
-    #[strum(message = "Message", detailed_message = "This sends a message")]
+    #[strum(message = "message", detailed_message = "This sends a message")]
     Message,
 
     Test,
@@ -88,7 +88,7 @@ impl Commands {
                     command.get_message().unwrap_or(command.as_ref()),
                     command
                         .get_detailed_message()
-                        .unwrap_or("No Help Message :(")
+                        .unwrap_or("No Help message :(")
                 )
                 .as_ref(),
             );
@@ -191,7 +191,7 @@ impl InputLoop {
                 }
             }
             Err(_) => {
-                println!("Message is too big!");
+                println!("message is too big!");
                 false
             }
         };

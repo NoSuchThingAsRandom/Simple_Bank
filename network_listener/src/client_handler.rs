@@ -1,9 +1,11 @@
 use crate::crypto::{TlsConnection, TlsServer};
-use crate::{Message, MessageOptions};
+//use crate::{Message, MessageOptions};
 
 use std::collections::HashMap;
 use std::sync::mpsc::*;
 
+use crate::messages_request::asd::request::RequestType;
+use crate::messages_request::asd::Request;
 use log::{error, info, trace, warn};
 use mio::{Events, Interest, Poll, Token};
 use rand::{RngCore, SeedableRng};
@@ -28,14 +30,14 @@ impl Client {
     pub fn new(addr: String, tls: TlsConnection) -> Client {
         Client {
             addr,
-            uuid: Message::new_secure_uuid_v4(),
+            uuid: Request::new_secure_uuid_v4(),
             client_buffer: Vec::new(),
             tls,
         }
     }
 
     ///Reads group of messages from a client
-    fn read_data(&mut self) -> Result<Vec<Message>, Box<dyn std::error::Error>> {
+    fn read_data(&mut self) -> Result<Vec<Request>, Box<dyn std::error::Error>> {
         trace!("Reading data from socket {}", self.addr);
         let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
         return match self.tls.read_plaintext(&mut buffer) {
@@ -61,7 +63,7 @@ impl Client {
     }
 
     ///Attempts to export messages from internal buffer
-    pub fn get_messages_from_buffer(&mut self) -> Vec<Message> {
+    pub fn get_messages_from_buffer(&mut self) -> Vec<Request> {
         trace!("Getting messages from buffer");
         let mut messages = Vec::new();
         while self.client_buffer.len() > 2 {
@@ -69,14 +71,14 @@ impl Client {
             let (size, buffer) = cloned_buffer.split_at(2);
             let data_size = u16::from_be_bytes([size[0], size[1]]);
             trace!(
-                "Message size is {}, buffer size {}",
+                "message size is {}, buffer size {}",
                 data_size,
                 buffer.len()
             );
             if buffer.len() >= data_size as usize {
                 let (msg_bytes, remaining_bytes) = buffer.split_at(data_size as usize).clone();
 
-                let msg = Message::new(
+                let msg = Request::new(
                     String::from_utf8(msg_bytes.to_vec()).expect("Invalid utf-8 received"),
                     self.uuid,
                     true,
@@ -100,15 +102,15 @@ pub struct ClientIo {
     current_client_count: usize,
     poll: Poll,
     incoming_clients: Receiver<Client>,
-    messages_in: Sender<Message>,
-    messages_out: Receiver<Message>,
+    messages_in: Sender<Request>,
+    messages_out: Receiver<Request>,
 }
 
 impl ClientIo {
     pub fn new(
         incoming_clients: Receiver<Client>,
-        messages_in: Sender<Message>,
-        messages_out: Receiver<Message>,
+        messages_in: Sender<Request>,
+        messages_out: Receiver<Request>,
     ) -> ClientIo {
         ClientIo {
             clients: HashMap::new(),
@@ -134,14 +136,14 @@ impl ClientIo {
                 client.tls.check_write();
             }
             //Send messages
-            let mut messages: Vec<Message> = self.messages_out.try_iter().collect();
+            let mut messages: Vec<Request> = self.messages_out.try_iter().collect();
             for client in self.clients.values_mut() {
                 messages.retain(|msg| {
-                    if msg.options == MessageOptions::Shutdown {
+                    if msg.r#type == RequestType::Shutdown as i32 {
                         shutdown = true;
                         false
                     } else {
-                        if client.uuid == msg.client {
+                        if client.uuid == msg.client_id.parse().unwrap() {
                             match client.tls.write_message(msg) {
                                 Ok(_) => false,
                                 Err(e) => {

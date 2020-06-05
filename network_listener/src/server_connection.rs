@@ -1,10 +1,12 @@
-use crate::{crypto, Message, MessageOptions};
+use crate::crypto;
 use std::io::Cursor;
 use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::messages_request::asd::request::RequestType;
+use crate::messages_request::asd::Request;
 use log::{error, info, trace, warn};
 use mio::{Events, Interest, Poll, Token};
 use rustls::ClientConfig;
@@ -44,13 +46,13 @@ impl ServerConn {
             addr: hostname,
             client_buffer: Vec::new(),
             tls: conn,
-            uuid: Message::new_secure_uuid_v4(),
+            uuid: Request::new_secure_uuid_v4(),
         }
     }
     pub fn start(
         &mut self,
-        incoming_messages: Sender<Message>,
-        outgoing_message: Receiver<Message>,
+        incoming_messages: Sender<Request>,
+        outgoing_message: Receiver<Request>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut poll: mio::Poll = Poll::new().unwrap();
         const READ_MESSAGE: Token = mio::Token(0);
@@ -95,9 +97,9 @@ impl ServerConn {
             }
 
             //Send messages
-            let mut messages: Vec<Message> = outgoing_message.try_iter().collect();
+            let mut messages: Vec<Request> = outgoing_message.try_iter().collect();
             messages.retain(|msg| {
-                if msg.options == MessageOptions::Shutdown {
+                if msg.r#type == RequestType::Shutdown as i32 {
                     shutdown = true;
                     false
                 } else {
@@ -143,7 +145,7 @@ impl ServerConn {
         Ok(())
     }
     ///Reads group of messages from a client
-    fn read_data(&mut self) -> Result<Vec<Message>, Box<dyn std::error::Error>> {
+    fn read_data(&mut self) -> Result<Vec<Request>, Box<dyn std::error::Error>> {
         trace!("Reading data from socket {}", self.addr);
         let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
         return match self.tls.read_plaintext(&mut buffer) {
@@ -169,7 +171,7 @@ impl ServerConn {
     }
 
     ///Attempts to export messages from internal buffer
-    fn get_messages_from_buffer(&mut self) -> Vec<Message> {
+    fn get_messages_from_buffer(&mut self) -> Vec<Request> {
         trace!("Getting messages from buffer");
         let mut messages = Vec::new();
         while self.client_buffer.len() > 2 {
@@ -177,14 +179,14 @@ impl ServerConn {
             let (size, buffer) = cloned_buffer.split_at(2);
             let data_size = u16::from_be_bytes([size[0], size[1]]);
             trace!(
-                "Message size is {}, buffer size {}",
+                "message size is {}, buffer size {}",
                 data_size,
                 buffer.len()
             );
             if buffer.len() >= data_size as usize {
                 let (msg_bytes, remaining_bytes) = buffer.split_at(data_size as usize).clone();
 
-                let msg = Message::new(
+                let msg = Request::new(
                     String::from_utf8(msg_bytes.to_vec()).expect("Invalid utf-8 received"),
                     self.uuid,
                     false,

@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package messages.request;
+
+message Request {
+    RequestType type = 1;
+    string user_id = 2;
+    string client_id = 3;
+    repeated string data = 4;
+    bool from_client = 5;
+
+    oneof detailed_type {
+        AuthenticateType auth = 10;
+        TransactionType transaction = 11;
+        AccountType account = 12;
+        MiscType misc = 13;
+    }
+
+
+    enum RequestType {
+        SHUTDOWN = 0;
+        AUTHENTICATE = 1;
+        TRANSACTIONS = 2;
+        ACCOUNT = 3;
+        MISC = 4;
+
+    }
+    enum AuthenticateType {
+        LOGIN = 0;
+        NEW_USER = 1;
+        CHANGE_PASSWORD = 2;
+    }
+    enum TransactionType {
+        LIST_TRANSACTIONS = 0;
+        TRANSACTION_INFO = 1;
+        NEW_TRANSACTION = 2;
+    }
+
+    enum AccountType {
+        LIST_ACCOUNTS = 0;
+        ACCOUNT_INFO = 1;
+        NEW_ACCOUNT = 2;
+    }
+    enum MiscType {
+        UNKNOWN = 0;
+        NEW_CLIENT=1;
+    }
+}

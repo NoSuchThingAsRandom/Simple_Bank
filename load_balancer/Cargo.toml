@@ -17,4 +17,6 @@ futures="0.3"
 mio = {version="0.7.0",features=["os-poll","tcp"]}
 chrono = "0.4.11"
 webpki = "0.21.3"
+prost = "0.6.1"
+prost-build = "0.6.1"
 network_listener={path="../network_listener"}

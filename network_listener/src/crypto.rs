@@ -3,11 +3,11 @@ use std::io::{BufReader, Error, Read};
 use std::net::Shutdown;
 use std::sync::Arc;
 
+use crate::client_handler::Client;
+use crate::messages_request::asd::Request;
+use bytes::BytesMut;
 use log::{error, info, trace, warn};
 use rustls::{NoClientAuth, RootCertStore, ServerConfig, TLSError};
-
-use crate::client_handler::Client;
-use crate::Message;
 
 pub struct TlsServer {
     listener: mio::net::TcpListener,
@@ -102,8 +102,11 @@ impl TlsConnection {
         Ok(())
     }
 
-    pub fn write_message(&mut self, msg: &Message) -> Result<(), Box<dyn std::error::Error>> {
-        let data = msg.data.as_bytes();
+    pub fn write_message(&mut self, msg: &Request) -> Result<(), Box<dyn std::error::Error>> {
+        //let mut buffer = None;
+        let mut buffer = BytesMut::with_capacity(1024);
+        msg.encode_length_delimeted(buffer);
+        let data = msg.data.get(0).unwrap().as_bytes();
         let size = data.len() as u16;
         let size_bytes = size.to_be_bytes();
 
