@@ -1,0 +1,61 @@
+@startuml
+package NetworkServer{
+    cloud "Client_Group"{
+        [Client_1]
+        [Client_2]
+        [Client_3]
+        [Client_4]
+    }
+    node Hidden{
+        package Get_Request{
+            node Listening_Server{
+                [Incoming_Clients]
+                [IO_Threads]
+                [Incoming_Messages]
+
+            }
+            package IO_1{
+                [A]
+                [B]
+            }
+
+            package IO_2{
+                [C]
+                [D]
+            }
+        }
+
+    }
+    node Public{
+        [Get_Messages]
+        [Send_Messages]
+
+    }
+    Client_1 .-> Incoming_Clients #Grey
+    Client_2 .-> Incoming_Clients#Grey
+    Client_3 .-> Incoming_Clients#Grey
+    Client_4 -.> Incoming_Clients#Grey
+    Incoming_Clients -left-> IO_Threads#Grey
+
+    Client_1 <--> IO_1 #Pink
+    Client_2 <--> IO_1#Pink
+    Client_3 <--> IO_2#Pink
+    Client_4 <--> IO_2#Pink
+
+
+
+
+
+    IO_Threads --> IO_1#LightGreen
+    IO_Threads --> IO_2#LightGreen
+    Send_Messages --> Incoming_Messages #LightGreen
+    Incoming_Messages --> IO_Threads#LightGreen
+
+    IO_1 -right-> Get_Messages#Blue
+    IO_2 -right-> Get_Messages#Blue
+    NetworkServer <-- Get_Messages
+    NetworkServer --> Send_Messages
+}
+
+
+@enduml

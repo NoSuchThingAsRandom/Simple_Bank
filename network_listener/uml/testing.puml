@@ -34,6 +34,8 @@ node Network_Worker{
         [Request_1]
         [Request_2]
     }
+    IO_1 -> Get_Request#Black
+    IO_2 -> Get_Request#Black
 }
 Client_1 -down.> Listening_Server #Grey
 Client_2 -down.> Listening_Server#Grey
@@ -44,6 +46,7 @@ Client_1 <-down-> IO_1
 Client_2 <-down-> IO_1
 Client_3 <-down-> IO_2
 Client_4 <-down-> IO_2
+
 
 
 
