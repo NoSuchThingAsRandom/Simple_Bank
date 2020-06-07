@@ -1,0 +1,168 @@
+@startuml
+node "Client_Group"{
+    [Client_1]
+    [Client_2]
+    [Client_3]
+    [Client_4]
+}
+Client_1 -right.> [Network_Worker]
+Client_2 -right.> [Network_Worker]
+Client_3 -right.> [Network_Worker]
+Client_4 -right.> [Network_Worker]
+
+Client_1 <-down-> Client_IO
+Client_2 <-down-> Client_IO
+Client_3 <-down-> Client_IO
+Client_4 <-down-> Client_IO
+
+node Client_IO{
+    package IO_1{
+        [A]
+        [B]
+    }
+
+    package IO_2{
+        [C]
+        [D]
+    }
+
+}
+Network_Worker -down-> Client_IO
+Client_IO <-> IO_1
+Client_IO <--> IO_2
+
+
+
+database Misc_Data
+package Misc_Balancer{
+    [Misc_A]
+    [Misc_B]
+    Misc_Balancer <--> Misc_A
+    Misc_Balancer <-> Misc_B
+}
+
+Misc_Balancer <-down-> Misc_Data
+Client_IO <-down-> Misc_Balancer
+
+
+database Auth_Data
+package Auth_Balancer{
+    [Auth_A]
+    [Auth_B]
+    Auth_Balancer <--> Auth_A
+    Auth_Balancer <-> Auth_B
+}
+
+Auth_Balancer <-down-> Auth_Data
+Client_IO <-down-> Auth_Balancer
+
+
+database Transactions_Data
+package Transactions_Balancer{
+    [Transactions_A]
+    [Transactions_B]
+    Transactions_Balancer <--> Transactions_A
+    Transactions_Balancer <-> Transactions_B
+}
+
+Transactions_Balancer <-down-> Transactions_Data
+Client_IO <-down-> Transactions_Balancer
+
+
+database Accounts_Data
+package Accounts_Balancer{
+    [Accounts_A]
+    [Accounts_B]
+    Accounts_Balancer <--> Accounts_A
+    Accounts_Balancer <-> Accounts_B
+}
+
+Accounts_Balancer <-down-> Accounts_Data
+Client_IO <-down-> Accounts_Balancer
+
+
+@enduml
+
+
+@startuml
+actor Client_1
+actor Client_2
+boundary Network_Worker
+control Client_IO_1
+control auth_manager
+control account_manager
+database credentials
+database accounts
+
+activate Network_Worker
+Network_Worker -> Client_IO_1 ++: Start
+
+==Initiate==
+deactivate Network_Worker
+deactivate Client_IO_1
+...Waiting for requests...
+
+Client_1 -> Network_Worker ++: Initiate Connection
+Network_Worker -> Network_Worker : Check for requests
+
+
+
+Network_Worker -> Client_IO_1 ++: Pass connection
+deactivate Network_Worker
+Client_IO_1 -> Client_IO_1 : Check for requests
+
+
+Client_IO_1 -> Client_1: Get Auth Details
+deactivate Client_IO_1
+
+...Waiting for requests...
+Client_1 -> Client_IO_1 ++: Send Auth Credentials
+Client_IO_1 -> Client_IO_1 : Check for requests
+
+Client_IO_1 -> auth_manager ++: Verify Credentials
+auth_manager -> auth_manager : Check for requests
+auth_manager <-> credentials : Check Credentials
+return Credentials
+Client_IO_1 -> Client_1 : Logged in
+deactivate Client_IO_1
+
+...Waiting for requests...
+
+Client_2 -> Network_Worker ++: Initiate Connection
+Network_Worker -> Network_Worker : Check for requests
+
+
+
+Network_Worker -> Client_IO_1 ++: Pass connection
+deactivate Network_Worker
+Client_IO_1 -> Client_IO_1 : Check for requests
+
+
+Client_IO_1 -> Client_2: Get Auth Details
+deactivate Client_IO_1
+
+...Waiting for requests...
+Client_2 -> Client_IO_1 ++: Send Auth Credentials
+Client_IO_1 -> Client_IO_1 : Check for requests
+
+Client_IO_1 -> auth_manager ++: Verify Credentials
+auth_manager -> auth_manager : Check for requests
+auth_manager <-> credentials : Check Credentials
+return Credentials
+Client_IO_1 -> Client_2 : Logged in
+deactivate Client_IO_1
+
+...Waiting for requests...
+
+
+Client_1 -> Client_IO_1 ++: Get accounts
+Client_IO_1 -> Client_IO_1 : Check for requests
+
+Client_IO_1 -> account_manager ++:Get account details
+account_manager <-> accounts :Get Data
+return Account details
+return Accounts
+
+deactivate Client_IO_1
+deactivate Client_1
+@enduml

@@ -1,0 +1,52 @@
+@startuml
+package "Client_Group"{
+    [Client_1]
+    [Client_2]
+    [Client_3]
+}
+Client_1 -down-> Load_Incoming
+Client_2 -down-> Load_Incoming
+Client_3 -down-> Load_Incoming
+
+
+package "Load_Balancers"{
+    Load_A <-up->Load_Incoming
+    Load_B <-up->Load_Incoming
+}
+
+
+
+node "Auth_Process"{
+    [Auth_Incoming]
+    Auth_A <-up->Auth_Incoming
+    Auth_B <-up->Auth_Incoming
+}
+node "Accounts_Process"{
+    [Accounts_Incoming]
+    Accounts_A <-up->Accounts_Incoming
+    Accounts_B <-up->Accounts_Incoming
+}
+
+
+node "Transaction_Process"{
+    [Transaction_Incoming]
+    Transaction_A <-up->Transaction_Incoming
+    Transaction_B <-up->Transaction_Incoming
+}
+
+
+
+node "Misc_Process"{
+    [Misc_Incoming]
+    Misc_A <-up->Misc_Incoming
+    Misc_B <-up->Misc_Incoming
+}
+
+Load_Balancers <-down-> Auth_Incoming
+Load_Balancers <-down-> Accounts_Incoming
+Load_Balancers <-down-> Transaction_Incoming
+Load_Balancers <-down-> Misc_Incoming
+
+
+
+@enduml

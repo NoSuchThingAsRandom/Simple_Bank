@@ -1,0 +1,114 @@
+
+
+
+@startuml
+component des[
+Each box represents a separate computer
+Internal boxes represent different processes/threads
+Databases can eventually be split across multiple machines as well
+
+The IO Process can handle up to 50? client connections
+Might not need separate request threads?
+A, B simulate a number of duplicate worker processes ]
+cloud "Client_Group"{
+    [Client_1]
+    [Client_2]
+    [Client_3]
+    [Client_4]
+}
+node Network_Worker{
+    package Get_Request{
+        node Listening_Server{
+        }
+        package IO_1{
+            [A]
+            [B]
+        }
+
+        package IO_2{
+            [C]
+            [D]
+        }
+    }
+    package Process_Request{
+        [Request_1]
+        [Request_2]
+    }
+}
+Client_1 -down.> Listening_Server #Grey
+Client_2 -down.> Listening_Server#Grey
+Client_3 -down.> Listening_Server#Grey
+Client_4 -down.> Listening_Server#Grey
+
+Client_1 <-down-> IO_1
+Client_2 <-down-> IO_1
+Client_3 <-down-> IO_2
+Client_4 <-down-> IO_2
+
+
+
+
+Listening_Server -down-> IO_1#Grey
+Listening_Server -down-> IO_2#Grey
+
+
+Get_Request -down-> Process_Request
+Process_Request -up-> Get_Request
+
+database Misc_Data
+node Misc_Balancer{
+    [Misc_A]
+    [Misc_B]
+    Misc_Balancer <--> Misc_A#Black
+    Misc_Balancer <-> Misc_B#Black
+}
+
+Misc_A <-down-> Misc_Data#Black
+Misc_B <-down-> Misc_Data#Black
+Request_1 <-down-> Misc_Balancer #Black
+Request_2 <-down-> Misc_Balancer#Black
+
+
+database Auth_Data
+node Auth_Balancer{
+    [Auth_A]
+    [Auth_B]
+    Auth_Balancer <--> Auth_A#Blue
+    Auth_Balancer <-> Auth_B#Blue
+}
+
+Auth_A <-down-> Auth_Data#Blue
+Auth_B <-down-> Auth_Data#Blue
+Request_1 <-down-> Auth_Balancer #Blue
+Request_2 <-down-> Auth_Balancer #Blue
+
+
+database Trans_Request_Data
+node Trans_Request_Balancer{
+    [Trans_Request_A]
+    [Trans_Request_B]
+    Trans_Request_Balancer <--> Trans_Request_A#Purple
+    Trans_Request_Balancer <-> Trans_Request_B#Purple
+}
+
+Trans_Request_A <-down-> Trans_Request_Data#Purple
+Trans_Request_B <-down-> Trans_Request_Data#Purple
+Request_1 <-down-> Trans_Request_Balancer #Purple
+Request_2 <-down-> Trans_Request_Balancer #Purple
+
+
+database Accounts_Data
+node Accounts_Balancer {
+    [Accounts_A]
+    [Accounts_B]
+    Accounts_Balancer <--> Accounts_A #Green
+    Accounts_Balancer <-> Accounts_B#Green
+}
+
+Accounts_A <-down-> Accounts_Data#Green
+Accounts_B <-down-> Accounts_Data#Green
+Request_1 <-down-> Accounts_Balancer #Green
+Request_2 <-down-> Accounts_Balancer #Green
+
+
+@enduml

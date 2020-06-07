@@ -1,0 +1,91 @@
+
+@startuml
+node "Client_Group"{
+    [Client_1]
+    [Client_2]
+    [Client_3]
+    [Client_4]
+}
+Client_1 -down.> [Network_Worker] #Grey
+Client_2 -down.> [Network_Worker]#Grey
+Client_3 -down.> [Network_Worker]#Grey
+Client_4 -down.> [Network_Worker]#Grey
+
+Client_1 <-down-> IO_1
+Client_2 <-down-> IO_1
+Client_3 <-down-> IO_2
+Client_4 <-down-> IO_2
+
+
+package IO_1{
+    [A]
+    [B]
+}
+
+package IO_2{
+    [C]
+    [D]
+}
+
+Network_Worker -down-> IO_1#Grey
+Network_Worker -down-> IO_2#Grey
+
+package Request_Balancer{
+    [1]
+    [2]
+}
+
+
+database Misc_Data
+node Misc_Balancer{
+    [Misc_A]
+    [Misc_B]
+    Misc_Balancer <--> Misc_A#Black
+    Misc_Balancer <-> Misc_B#Black
+}
+
+Misc_Balancer <-down-> Misc_Data#Black
+IO_1 <-down-> Misc_Balancer #Black
+IO_2 <-down-> Misc_Balancer#Black
+
+
+database Auth_Data
+node Auth_Balancer{
+    [Auth_A]
+    [Auth_B]
+    Auth_Balancer <--> Auth_A#Blue
+    Auth_Balancer <-> Auth_B#Blue
+}
+
+Auth_Balancer <-down-> Auth_Data#Blue
+IO_1 <-down-> Auth_Balancer #Blue
+IO_2 <-down-> Auth_Balancer #Blue
+
+
+database Transactions_Data
+node Transactions_Balancer{
+    [Transactions_A]
+    [Transactions_B]
+    Transactions_Balancer <--> Transactions_A#Purple
+    Transactions_Balancer <-> Transactions_B#Purple
+}
+
+Transactions_Balancer <-down-> Transactions_Data#Purple
+IO_1 <-down-> Transactions_Balancer #Purple
+IO_2 <-down-> Transactions_Balancer #Purple
+
+
+database Accounts_Data
+node Accounts_Balancer {
+    [Accounts_A]
+    [Accounts_B]
+    Accounts_Balancer <--> Accounts_A #Green
+    Accounts_Balancer <-> Accounts_B#Green
+}
+
+Accounts_Balancer <-down-> Accounts_Data#Green
+IO_1 <-down-> Accounts_Balancer #Green
+IO_2 <-down-> Accounts_Balancer #Green
+
+
+@enduml
