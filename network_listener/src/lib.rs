@@ -9,11 +9,11 @@ use crate::protos::message::{Request, Request_RequestType};
 use std::sync::mpsc::{channel, Receiver, SendError, Sender};
 use std::thread;
 
-use log::{info, warn};
+use log::{error, info, warn};
 use rand::{RngCore, SeedableRng};
 use uuid::{Builder, Uuid, Variant, Version};
 
-pub const ADDRESS: &str = "127.0.0.1";
+pub const ADDRESS: &str = "127.0.0.1:";
 pub const DATA_MISC_PORT: &str = "49700";
 pub const DATA_TRANSACTIONS_PORT: &str = "49800";
 pub const DATA_ACCOUNTS_PORT: &str = "49900";
@@ -65,43 +65,43 @@ impl Request {
     }
 }
 
-/*
-#[derive(Clone, PartialEq)]
-pub enum MessageOptions {
-    NewClient,
-    Shutdown,
-    None,
+pub struct Client {
+    pub addr: String,
+    pub messages: Vec<Request>,
+    messages_in: Receiver<Request>,
+    messages_out: Sender<Request>,
 }
 
-#[derive(Clone)]
-pub struct message {
-    pub data: String,
-    pub client: Uuid,
-    pub from_client: bool,
-    pub options: MessageOptions,
-}*/
+impl Client {
+    pub fn start(addr: String) -> Client {
+        let (incoming_messages_out, incoming_messages_in) = channel();
+        let (outgoing_messages_out, outgoing_messages_in) = channel();
+        let server_address = addr.clone();
+        thread::spawn(move || {
+            error!("Need to start network thread!");
 
-/*
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if self.from_client {
-            write!(
-                f,
-                "Recieved message from {}    Contents: {}",
-                self.client.to_string(),
-                self.data
-            )
-        } else {
-            write!(
-                f,
-                "Sending message to: {}    Contents: {}",
-                self.client.to_string(),
-                self.data
-            )
+            let mut conn = server_connection::ServerConn::new(addr.clone());
+            conn.start(incoming_messages_out, outgoing_messages_in)
+                .unwrap();
+        });
+        Client {
+            addr: server_address,
+            messages: Vec::new(),
+            messages_in: incoming_messages_in,
+            messages_out: outgoing_messages_out,
         }
     }
+    pub fn get_messages(&mut self) -> Vec<Request> {
+        self.messages_in.try_iter().collect()
+    }
+
+    pub fn get_message_blocking(&mut self) -> Vec<Request> {
+        self.messages_in.iter().collect()
+    }
+    pub fn send_message(&mut self, message: Request) -> Result<(), SendError<Request>> {
+        self.messages_out.send(message)
+    }
 }
-*/
 
 /// Initiation struct for network worker and holding all publicly accessible variables
 pub struct Server {
@@ -162,67 +162,26 @@ impl Server {
         self.messages_out.send(Request::shutdown())
     }
     pub fn get_messages(&mut self) -> Vec<Request> {
-        let mut messages = Vec::new();
-        for msg in self.messages_in.try_iter() {
+        let messages: Vec<Request> = self.messages_in.try_iter().collect();
+        for msg in &messages {
             //TODO Check if it is a new client
-            warn!("Checking for client, using incorrect methiods");
+            warn!("Need to check for new client connection");
             if msg.field_type == Request_RequestType::AUTHENTICATE {
-                //if msg.detailed_type == MessageOptions::NewClient {
                 self.connections.push(msg.client_id.parse().unwrap());
-            } else {
-                messages.push(msg);
             }
         }
         messages
     }
     pub fn get_messages_blocking(&mut self) -> Vec<Request> {
-        let mut messages = Vec::new();
-        for msg in self.messages_in.iter() {
+        let messages: Vec<Request> = self.messages_in.iter().collect();
+        for msg in &messages {
             //TODO Check if it is a new client
-            warn!("Checking for client, using incorrect methiods");
+            warn!("Need to check for new client connection");
             if msg.field_type == Request_RequestType::AUTHENTICATE {
                 self.connections.push(msg.client_id.parse().unwrap());
-            } else {
-                messages.push(msg);
             }
         }
         messages
-    }
-}
-
-pub struct Client {
-    pub addr: String,
-    pub messages: Vec<Request>,
-    messages_in: Receiver<Request>,
-    messages_out: Sender<Request>,
-}
-
-impl Client {
-    pub fn start(addr: String) -> Client {
-        let (incoming_messages_out, incoming_messages_in) = channel();
-        let (outgoing_messages_out, outgoing_messages_in) = channel();
-        let server_address = addr.clone();
-        thread::spawn(move || {
-            let mut conn = server_connection::ServerConn::new(addr.clone());
-            conn.start(incoming_messages_out, outgoing_messages_in)
-                .unwrap();
-        });
-        Client {
-            addr: server_address,
-            messages: Vec::new(),
-            messages_in: incoming_messages_in,
-            messages_out: outgoing_messages_out,
-        }
-    }
-    pub fn get_messages(&mut self) -> Vec<Request> {
-        self.messages_in.try_iter().collect()
-    }
-
-    pub fn get_message_blocking(&mut self) -> Vec<Request> {
-        self.messages_in.iter().collect()
-    }
-    pub fn send_message(&mut self, message: Request) -> Result<(), SendError<Request>> {
-        self.messages_out.send(message)
     }
 }
 

@@ -1,18 +1,16 @@
 use simplelog::{
     CombinedLogger, ConfigBuilder, LevelFilter, TermLogger, TerminalMode, WriteLogger,
 };
-use std::env;
-use std::fs::File;
 
-pub mod test {
-    //include!(concat!("", "load_balancer/test.rs"));
-}
+use load_balancer::Instance;
+use std::fs::File;
 
 fn main() {
     let mut config = ConfigBuilder::new();
     config.set_location_level(LevelFilter::Error);
     config.set_thread_level(LevelFilter::Error);
     config.set_time_level(LevelFilter::Error);
+    config.add_filter_ignore(String::from("rustls"));
     CombinedLogger::init(vec![
         TermLogger::new(LevelFilter::Trace, config.build(), TerminalMode::Stdout),
         WriteLogger::new(
@@ -22,6 +20,7 @@ fn main() {
         ),
     ])
     .unwrap();
+    Instance::new().start()
     /*let mut input_loop = InputLoop::new(String::from("127.0.0.1:50000"));
     input_loop.start();*/
 }
