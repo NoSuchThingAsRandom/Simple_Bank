@@ -7,7 +7,7 @@ use crate::client_handler::Client;
 use crate::protos::message::Request;
 use log::{error, info, trace, warn};
 use protobuf::Message;
-use rustls::{NoClientAuth, RootCertStore, ServerConfig, TLSError};
+use rustls::{NoClientAuth, ServerConfig};
 
 pub struct TlsServer {
     listener: mio::net::TcpListener,
@@ -97,14 +97,14 @@ impl TlsConnection {
     pub fn check_write(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let req = self.tls_session.wants_write();
         if req {
-            let n = self.tls_session.write_tls(&mut self.socket)?;
+            self.tls_session.write_tls(&mut self.socket)?;
         }
         Ok(())
     }
 
     pub fn write_message(&mut self, msg: &Request) -> Result<(), Box<dyn std::error::Error>> {
         //let mut buffer = None;
-        let mut buffer = msg.write_length_delimited_to_bytes().unwrap();
+        let buffer = msg.write_length_delimited_to_bytes().unwrap();
         let size = buffer.len() as u16;
         let size_bytes = size.to_be_bytes();
 

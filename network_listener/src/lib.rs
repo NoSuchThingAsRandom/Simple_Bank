@@ -6,12 +6,10 @@ mod server_connection;
 
 use crate::protos::message::{Request, Request_RequestType};
 
-use std::fmt::Formatter;
-use std::net::Shutdown::Read;
 use std::sync::mpsc::{channel, Receiver, SendError, Sender};
-use std::{fmt, thread};
+use std::thread;
 
-use log::{error, info, trace, warn};
+use log::{info, warn};
 use rand::{RngCore, SeedableRng};
 use uuid::{Builder, Uuid, Variant, Version};
 
@@ -22,7 +20,7 @@ pub const DATA_ACCOUNTS_PORT: &str = "49900";
 pub const LOAD_BALANCER_PORT: &str = "50000";
 
 const MAX_CLIENTS_THREAD: u8 = 20;
-const MAX_MESSAGE_BYTES: u16 = 65535;
+const _MAX_MESSAGE_BYTES: u16 = 65535;
 
 impl Request {
     pub fn new_from_fields(
@@ -206,7 +204,8 @@ impl Client {
         let server_address = addr.clone();
         thread::spawn(move || {
             let mut conn = server_connection::ServerConn::new(addr.clone());
-            conn.start(incoming_messages_out, outgoing_messages_in);
+            conn.start(incoming_messages_out, outgoing_messages_in)
+                .unwrap();
         });
         Client {
             addr: server_address,
@@ -226,8 +225,6 @@ impl Client {
         self.messages_out.send(message)
     }
 }
-
-fn main() {}
 
 #[cfg(test)]
 mod tests {

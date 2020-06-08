@@ -1,15 +1,13 @@
 use crate::crypto::TlsConnection;
-//use crate::{Message, MessageOptions};
+use crate::protos::message::{Request, Request_RequestType};
 
 use std::collections::HashMap;
 use std::sync::mpsc::*;
+use std::time::Duration;
 
-use crate::protos::message::{Request, Request_RequestType};
 use log::{error, info, trace, warn};
 use mio::{Events, Interest, Poll, Token};
-use rand::{RngCore, SeedableRng};
-use std::time::Duration;
-use uuid::{Builder, Uuid, Variant, Version};
+use uuid::Uuid;
 
 //pub(crate) const ADDR: &str = "127.0.0.1:5962";
 
@@ -126,7 +124,7 @@ impl ClientIo {
                 shutdown = true;
             }
             for client in self.clients.values_mut() {
-                client.tls.check_write();
+                client.tls.check_write().unwrap();
             }
             //Send messages
             let mut messages: Vec<Request> = self.messages_out.try_iter().collect();
@@ -186,6 +184,7 @@ impl ClientIo {
                 }
             }
         }
+        //Close program
         info!("Starting shutdown of IO thread");
         trace!("Checking for unparsed data in buffers");
         for client in self.clients.values_mut() {

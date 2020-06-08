@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::protos::message::{Request, Request_RequestType};
-use log::{error, info, trace, warn};
+use log::{error, info, trace};
 use mio::{Events, Interest, Poll, Token};
 use uuid::Uuid;
 
