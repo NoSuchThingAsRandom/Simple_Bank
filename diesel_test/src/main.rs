@@ -1,11 +1,12 @@
-use protobuf::Message;
+#[macro_use]
+extern crate diesel;
+extern crate dotenv;
 
-mod message;
+pub mod db_connection;
+pub mod models;
+pub mod schema;
 fn main() {
-    let mut req = message::Request::new();
-    req.set_client_id(String::from("Hello"));
-    req.write_length_delimited_to_vec();
-    println!("HEllo world\n{:?}", req);
+    let conn = db_connection::establish_connection();
 }
 
 #[cfg(test)]
