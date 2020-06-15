@@ -1,5 +1,7 @@
-use super::schema::{bank_accounts, user_details};
+use super::schema::{bank_accounts, tokens, user_details};
 extern crate chrono;
+extern crate uuid;
+
 #[derive(Queryable, Insertable)]
 #[table_name = "user_details"]
 pub struct User {
@@ -9,7 +11,7 @@ pub struct User {
     pub email: String,
     pub date_of_birth: chrono::naive::NaiveDate,
     pub join_date: chrono::naive::NaiveDate,
-    pub archived:bool
+    pub archived: bool,
 }
 
 #[derive(Queryable, Insertable)]
@@ -23,5 +25,13 @@ pub struct Account {
     overdraft_limit: bigdecimal::BigDecimal,
     account_name: Option<String>,
     account_category: Option<String>,
-    archived:bool
+    archived: bool,
+}
+#[derive(Queryable, Insertable)]
+#[table_name = "tokens"]
+pub struct Token {
+    pub(crate) token: String,
+    pub client_uuid: uuid::Uuid,
+    pub start_date: chrono::NaiveDateTime,
+    pub expiry_date: chrono::NaiveDateTime,
 }

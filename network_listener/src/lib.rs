@@ -22,6 +22,11 @@ pub const LOAD_BALANCER_PORT: &str = "50000";
 const MAX_CLIENTS_THREAD: u8 = 20;
 const _MAX_MESSAGE_BYTES: u16 = 65535;
 
+/**
+    Client uuid - An identifier for the socket connection
+    User uuid   - An identifier for a authenticated user
+
+**/
 impl Request {
     pub fn new_from_fields(
         data: Vec<String>,
@@ -35,6 +40,7 @@ impl Request {
             data: protobuf::RepeatedField::from_vec(data),
             from_client,
             detailed_type: Default::default(),
+            token_id: "".to_string(),
             unknown_fields: protobuf::UnknownFields::new(),
             cached_size: Default::default(),
         };
@@ -48,6 +54,7 @@ impl Request {
             data: Default::default(),
             from_client: false,
             detailed_type: None,
+            token_id: "".to_string(),
             unknown_fields: Default::default(),
             cached_size: Default::default(),
         }
@@ -78,11 +85,11 @@ impl Client {
         let (outgoing_messages_out, outgoing_messages_in) = channel();
         let server_address = addr.clone();
         thread::spawn(move || {
-            error!("Need to start network thread!");
+            //TODO Need to renable client network thread
+            error!("Need to renable network thread!");
 
-            let mut conn = server_connection::ServerConn::new(addr.clone());
-            conn.start(incoming_messages_out, outgoing_messages_in)
-                .unwrap();
+            //let mut conn = server_connection::ServerConn::new(addr.clone());
+            //conn.start(incoming_messages_out, outgoing_messages_in).unwrap();
         });
         Client {
             addr: server_address,

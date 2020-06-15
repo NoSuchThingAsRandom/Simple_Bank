@@ -1,12 +1,14 @@
+use std::fs::File;
+
 use simplelog::{
     CombinedLogger, ConfigBuilder, LevelFilter, TermLogger, TerminalMode, WriteLogger,
 };
 
 use load_balancer::Instance;
-use std::fs::File;
 
 fn main() {
     let mut config = ConfigBuilder::new();
+    println!("Start");
     config.set_location_level(LevelFilter::Error);
     config.set_thread_level(LevelFilter::Error);
     config.set_time_level(LevelFilter::Error);
@@ -20,7 +22,7 @@ fn main() {
         ),
     ])
     .unwrap();
-    Instance::new().start()
+    //Instance::new().start()
     /*let mut input_loop = InputLoop::new(String::from("127.0.0.1:50000"));
     input_loop.start();*/
 }

@@ -13,6 +13,15 @@ table! {
 }
 
 table! {
+    tokens (token) {
+        token -> Text,
+        client_uuid -> Uuid,
+        start_date -> Timestamp,
+        expiry_date -> Timestamp,
+    }
+}
+
+table! {
     user_details (user_uuid) {
         user_uuid -> Uuid,
         username -> Text,
@@ -26,5 +35,6 @@ table! {
 
 allow_tables_to_appear_in_same_query!(
     bank_accounts,
+    tokens,
     user_details,
 );

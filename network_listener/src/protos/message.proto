@@ -8,7 +8,7 @@ message Request {
     string client_id = 3;
     repeated string data = 4;
     bool from_client = 5;
-
+    string token_id = 6;
     oneof detailed_type {
         AuthenticateType auth = 10;
         TransactionType transaction = 11;
