@@ -1,15 +1,15 @@
+use log::{error, info, trace, warn};
+use network_listener::protos::message::Request;
+use rustls::ClientConfig;
 use std::fmt::Formatter;
 use std::io::Cursor;
+use std::net::Shutdown::Read;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fmt, io, thread};
-
-use log::{error, info, trace, warn};
-use rustls::ClientConfig;
-use std::net::Shutdown::Read;
 use strum::EnumMessage;
 use strum::IntoEnumIterator;
 use strum_macros::AsRefStr;
@@ -19,8 +19,6 @@ use strum_macros::EnumString;
 use text_io::read;
 
 pub mod data_handler;
-
-use network_listener::protos::message::Request;
 
 #[derive(EnumIter, EnumString, EnumMessage, Debug, AsRefStr)]
 enum Commands {

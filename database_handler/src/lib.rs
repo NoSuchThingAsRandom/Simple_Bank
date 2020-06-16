@@ -14,7 +14,7 @@ use crate::models::{Account, Token, User};
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use dotenv::dotenv;
-use log::{error, warn};
+use log::{error, trace, warn};
 
 use rand::{RngCore, SeedableRng};
 use std::env;
@@ -34,10 +34,10 @@ impl DbConnection {
             .expect(&format!("Failed connecting to DB {}", database_url));
         DbConnection { connection }
     }
-    pub fn new_user_account(&mut self, details: User) -> QueryResult<()> {
+    pub fn new_user_account(&mut self, details: &User) -> QueryResult<()> {
         DbConnection::check_query_processed(
             diesel::insert_into(schema::user_details::table)
-                .values(&details)
+                .values(details)
                 .execute(&self.connection),
         )
     }
@@ -49,9 +49,11 @@ impl DbConnection {
         )
     }
     pub fn get_user_account(&mut self, user_uuid: uuid::Uuid) -> QueryResult<User> {
-        schema::user_details::table
+        let res = schema::user_details::table
             .find(user_uuid)
-            .get_result(&self.connection)
+            .get_result(&self.connection);
+        if res.is_err() {}
+        res
     }
     pub fn get_bank_account(&mut self, account_number: i32) -> QueryResult<Account> {
         schema::bank_accounts::table
@@ -63,7 +65,7 @@ impl DbConnection {
             .filter(schema::user_details::user_uuid.eq(user_uuid))
             .first(&self.connection)?;
         if user.archived {
-            println!("User has already been archived! ");
+            warn!("User has already been archived! ");
             return Err(diesel::result::Error::NotFound);
         }
         DbConnection::check_query_processed(
@@ -160,8 +162,10 @@ impl DbConnection {
             .first(&self.connection);
         if let Err(e) = hashed {
             if e == diesel::result::Error::NotFound {
+                trace!("Invalid username");
                 return Ok(None);
             }
+            error!("Unexpected error logging in {}", e);
             return Err(e);
         }
         if argon2::verify_encoded(&hashed.unwrap(), password.as_bytes()).unwrap() {
@@ -179,11 +183,14 @@ impl DbConnection {
                 .values(insert_token)
                 .execute(&self.connection);
             if rows == Ok(1) {
+                trace!("Created token");
                 Ok(Some(token))
             } else {
+                trace!("Failed to create token");
                 Ok(None)
             }
         } else {
+            trace!("Invalid password");
             Ok(None)
         }
     }
@@ -216,30 +223,58 @@ mod user_accounts_test {
     use crate::models::User;
     use crate::{new_secure_uuid_v4, DbConnection};
     use chrono::Utc;
+    use log::LevelFilter;
+    use log::{error, trace, warn};
+    use simplelog::{ConfigBuilder, TermLogger, TerminalMode};
     use std::str::FromStr;
 
-    const USER_UUID: &str = "e78836e9-1982-4380-a678-a5b4db33d205";
+    const USER_UUID_1: &str = "e78836e9-1982-4380-a678-a5b4db33d205";
+    const USER_UUID_2: &str = "abe8e4bb-c87a-48ff-a4fb-2ebd42745aae";
+
+    fn get_testing_user() -> User {
+        let user_id = USER_UUID_2.parse().unwrap();
+        User {
+            user_uuid: user_id,
+            username: "Test_02".to_string(),
+            password: "password".to_string(),
+            email: "test2@example.com".to_string(),
+            date_of_birth: Utc::today().naive_utc(),
+            join_date: Utc::today().naive_utc(),
+            archived: false,
+        }
+    }
+
+    fn check_user_exists(user: &User) {
+        trace!("Starting l");
+        let mut con = DbConnection::new_connection();
+        if con.get_user_account(user.user_uuid).is_err() {
+            con.new_user_account(&user).unwrap();
+        }
+    }
 
     #[test]
-    fn create_user_account() {
-        let today = Utc::today();
-        let user_id = uuid::Uuid::from_str(&USER_UUID).unwrap();
+    fn create_and_delete_user_account() {
+        let user_id = USER_UUID_1.parse().unwrap();
         let user = User {
             user_uuid: user_id,
             username: "Test_01".to_string(),
-            password: DbConnection::hash_password("password".to_string()),
-            email: "test@example.com".to_string(),
+            password: "password".to_string(),
+            email: "test1@example.com".to_string(),
             date_of_birth: Utc::today().naive_utc(),
             join_date: Utc::today().naive_utc(),
             archived: false,
         };
         let mut con = DbConnection::new_connection();
-        assert!(con.new_user_account(user).is_ok());
+        assert!(con.new_user_account(&user).is_ok());
+        assert!(con.delete_user_account(user.user_uuid).is_ok());
     }
+
     #[test]
     fn get_auth_token() {
-        let username = "Test_01".to_string();
-        let password = "password".to_string();
+        let user = get_testing_user();
+        let username = user.username.clone();
+        let password = user.password.clone();
+        check_user_exists(&user);
         let mut con = DbConnection::new_connection();
         let token = con.login(username, password);
         assert!(token.is_ok());
@@ -248,22 +283,27 @@ mod user_accounts_test {
 
     #[test]
     fn get_user_account() {
+        let user = get_testing_user();
         let mut con = DbConnection::new_connection();
-        let user_id = uuid::Uuid::from_str(&USER_UUID).unwrap();
-        assert!(con.get_user_account(user_id).is_ok());
+        check_user_exists(&user);
+        assert!(con.get_user_account(user.user_uuid).is_ok());
     }
 
     #[test]
     fn archive_user_account() {
         let mut con = DbConnection::new_connection();
-        let user_id = uuid::Uuid::from_str(&USER_UUID).unwrap();
+        let user_id = new_secure_uuid_v4();
+        let user = User {
+            user_uuid: user_id,
+            username: "Test_03".to_string(),
+            password: DbConnection::hash_password("password".to_string()),
+            email: "test@example.com".to_string(),
+            date_of_birth: Utc::today().naive_utc(),
+            join_date: Utc::today().naive_utc(),
+            archived: false,
+        };
+        con.new_user_account(&user);
         assert!(con.archive_user_account(user_id).is_ok());
-    }
-
-    #[test]
-    fn delete_user_account() {
-        let mut con = DbConnection::new_connection();
-        let user_id = uuid::Uuid::from_str(&USER_UUID).unwrap();
-        assert!(con.delete_user_account(user_id).is_ok());
+        con.delete_user_account(user_id).unwrap();
     }
 }

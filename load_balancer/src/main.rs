@@ -7,8 +7,8 @@ use simplelog::{
 use load_balancer::Instance;
 
 fn main() {
-    let mut config = ConfigBuilder::new();
     println!("Start");
+    let mut config = ConfigBuilder::new();
     config.set_location_level(LevelFilter::Error);
     config.set_thread_level(LevelFilter::Error);
     config.set_time_level(LevelFilter::Error);
