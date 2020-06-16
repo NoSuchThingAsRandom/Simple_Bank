@@ -1,15 +1,17 @@
-extern crate base64;
 extern crate database_handler;
 extern crate network_listener;
-extern crate rand;
+
+use std::error::Error;
 
 use log::error;
 use log::info;
+use log::trace;
 use log::warn;
-use rand::{RngCore, SeedableRng};
 
 use database_handler::DbConnection;
-use network_listener::protos::message::Request;
+use network_listener::protos::message::{
+    Request, Request_AuthenticateType, Request_ResultType, Request_oneof_detailed_type,
+};
 use network_listener::{
     protos::message::Request_RequestType, Client, ADDRESS, DATA_ACCOUNTS_PORT, DATA_MISC_PORT,
     DATA_TRANSACTIONS_PORT, LOAD_BALANCER_PORT,
@@ -49,15 +51,14 @@ impl Instance {
         loop {
             //Get incoming client messages
             for msg in self.network_server.get_messages() {
-                if match self.verify_authentication(&msg) {
+                if match self.token_is_valid(&msg) {
                     Ok(auth) => auth,
                     Err(e) => {
                         warn!("Failed to verify auth {}", e);
                         false
                     }
                 } {
-                    //TODO User login
-                } else {
+                    //Parse user request
                     match msg.field_type {
                         Request_RequestType::SHUTDOWN => {}
                         Request_RequestType::AUTHENTICATE => {
@@ -80,6 +81,38 @@ impl Instance {
                                 error!("Failed to make request to data misc ({})", e);
                             };
                         }
+                    }
+                } else {
+                    if msg.field_type == Request_RequestType::AUTHENTICATE {
+                        if msg.detailed_type
+                            == Some(Request_oneof_detailed_type::auth(
+                                Request_AuthenticateType::LOGIN,
+                            ))
+                        {
+                            self.login(&msg);
+                        } else {
+                            //Create new user
+                            self.create_user(&msg);
+                        }
+                    } else {
+                        //Send login request
+                        trace!("Message not authenticated, sending login request");
+                        let auth_req = Request {
+                            field_type: Request_RequestType::AUTHENTICATE,
+                            user_id: msg.user_id.clone(),
+                            client_id: msg.client_id.clone(),
+                            data: Default::default(),
+                            from_client: false,
+                            token_id: "".to_string(),
+                            detailed_type: Some(Request_oneof_detailed_type::auth(
+                                Request_AuthenticateType::LOGIN,
+                            )),
+                            unknown_fields: Default::default(),
+                            cached_size: Default::default(),
+                        };
+                        if self.network_server.send_message(auth_req).is_err() {
+                            warn!("Failed to send login message to {}", &msg.client_id);
+                        };
                     }
                 }
             }
@@ -112,8 +145,49 @@ impl Instance {
             }*/
         }
     }
+    fn create_user(&mut self, msg: &Request) -> Result<(), Box<dyn Error>> {
+        Ok(())
+    }
+    fn login(&mut self, msg: &Request) -> Result<(), Box<dyn Error>> {
+        let token_req = self.database_connection.login(
+            String::from(msg.data.get(0).ok_or("")?),
+            String::from(msg.data.get(0).ok_or("")?),
+        );
 
-    fn verify_authentication(&mut self, msg: &Request) -> Result<bool, Box<dyn std::error::Error>> {
+        let result: Request = match token_req {
+            Ok(token_opt) => match token_opt {
+                Some(token) => {
+                    let mut data = Vec::new();
+                    data.push(token);
+                    Request::success_result(
+                        data,
+                        msg.client_id.clone(),
+                        Request_ResultType::SUCCESS,
+                    )?
+                }
+                None => Request::success_result(
+                    Vec::new(),
+                    msg.client_id.clone(),
+                    Request_ResultType::INVALID_ARGS,
+                )?,
+            },
+
+            Err(E) => Request::success_result(
+                Vec::new(),
+                msg.client_id.clone(),
+                Request_ResultType::UNEXPECTED_ERROR,
+            )?,
+        };
+        self.network_server.send_message(result)?;
+        Ok(())
+    }
+
+    /** Validates a token
+            Ok(True) - The token is valid
+            Ok(False) -  The token has expired/invalid
+            Err - The token doesn't exist/unexpected error
+    **/
+    fn token_is_valid(&mut self, msg: &Request) -> Result<bool, Box<dyn std::error::Error>> {
         return Ok(self
             .database_connection
             .check_token(msg.token_id.parse()?, msg.user_id.parse()?)?);
@@ -123,7 +197,7 @@ impl Instance {
         &mut self,
         msg: Request,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let token = Instance::generate_token();
+        //let token = Instance::generate_token();
         Ok(())
     }
 

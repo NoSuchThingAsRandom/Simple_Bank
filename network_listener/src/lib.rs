@@ -4,7 +4,9 @@ mod network_worker;
 pub mod protos;
 mod server_connection;
 
-use crate::protos::message::{Request, Request_RequestType};
+use crate::protos::message::{
+    Request, Request_RequestType, Request_ResultType, Request_oneof_detailed_type,
+};
 
 use std::sync::mpsc::{channel, Receiver, SendError, Sender};
 use std::thread;
@@ -40,6 +42,24 @@ impl Request {
             data: protobuf::RepeatedField::from_vec(data),
             from_client,
             detailed_type: Default::default(),
+            token_id: "".to_string(),
+            unknown_fields: protobuf::UnknownFields::new(),
+            cached_size: Default::default(),
+        };
+        Ok(message)
+    }
+    pub fn success_result(
+        data: Vec<String>,
+        client: String,
+        result_type: Request_ResultType,
+    ) -> Result<Request, std::io::Error> {
+        let message = Request {
+            field_type: Request_RequestType::Result,
+            user_id: Default::default(),
+            client_id: client,
+            data: protobuf::RepeatedField::from_vec(data),
+            from_client: false,
+            detailed_type: Some(Request_oneof_detailed_type::result(result_type)),
             token_id: "".to_string(),
             unknown_fields: protobuf::UnknownFields::new(),
             cached_size: Default::default(),

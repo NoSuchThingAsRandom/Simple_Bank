@@ -10,7 +10,7 @@ edition = "2018"
 diesel = { version = "1.4.4", features = ["postgres","chrono","uuidv07","numeric"] }
 dotenv = "0.15.0"
 chrono = "0.4.11"
-uuid={version="0.7",features=["v4"]}
+uuid={version = "0.8",features=["v4"]}
 bigdecimal = "0.1.2"
 rand = "0.7.3"
 rand_chacha = "0.2.2"

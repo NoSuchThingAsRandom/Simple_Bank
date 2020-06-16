@@ -14,6 +14,7 @@ message Request {
         TransactionType transaction = 11;
         AccountType account = 12;
         MiscType misc = 13;
+        ResultType result = 14;
     }
 
 
@@ -23,7 +24,7 @@ message Request {
         TRANSACTIONS = 2;
         ACCOUNT = 3;
         MISC = 4;
-
+        Result=5;
     }
     enum AuthenticateType {
         LOGIN = 0;
@@ -44,5 +45,10 @@ message Request {
     enum MiscType {
         UNKNOWN = 0;
         NEW_CLIENT=1;
+    }
+    enum ResultType {
+        SUCCESS = 0;
+        INVALID_ARGS=1;
+        UNEXPECTED_ERROR=2;
     }
 }

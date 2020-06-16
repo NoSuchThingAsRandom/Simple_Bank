@@ -22,6 +22,7 @@ fn main() {
         ),
     ])
     .unwrap();
+    println!("Dibe");
     //Instance::new().start()
     /*let mut input_loop = InputLoop::new(String::from("127.0.0.1:50000"));
     input_loop.start();*/

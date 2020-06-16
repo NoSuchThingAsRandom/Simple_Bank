@@ -100,6 +100,11 @@ impl DbConnection {
         }
         Err(query.err().expect("Failed to unwrap error"))
     }
+    /** Checks if a given token is valid for the given user
+        Ok(True) - The token is valid
+        Ok(False) -  The token has expired/invalid
+        Err - The token doesn't exist/unexpected error
+    **/
     pub fn check_token(&mut self, token_id: String, client_id: Uuid) -> QueryResult<bool> {
         let token: Token = schema::tokens::table
             .filter(schema::tokens::token.eq(token_id))
@@ -206,9 +211,13 @@ impl DbConnection {
     }
 }
 
+/** Generates a new unique uuid
+    Uses secure random
+
+**/
 pub fn new_secure_uuid_v4() -> Uuid {
-    let mut rng = rand::rngs::StdRng::from_entropy();
     let mut bytes = [0; 16];
+    let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
 
     rng.fill_bytes(&mut bytes);
 
@@ -270,15 +279,20 @@ mod user_accounts_test {
     }
 
     #[test]
-    fn get_auth_token() {
+    fn check_auth_token() {
         let user = get_testing_user();
         let username = user.username.clone();
         let password = user.password.clone();
         check_user_exists(&user);
         let mut con = DbConnection::new_connection();
-        let token = con.login(username, password);
-        assert!(token.is_ok());
-        assert!(token.unwrap().is_some());
+        let token_res = con.login(username, password);
+        assert!(token_res.is_ok());
+        let token_opt = token_res.unwrap();
+        assert!(token_opt.is_some());
+        let token = token_opt.unwrap();
+        let check_token = con.check_token(token, user.user_uuid);
+        assert!(check_token.is_ok());
+        assert!(check_token.unwrap());
     }
 
     #[test]
