@@ -9,12 +9,13 @@ edition = "2018"
 [dependencies]
 diesel = { version = "1.4.4", features = ["postgres","chrono","uuidv07","numeric"] }
 dotenv = "0.15.0"
-chrono = "0.4.11"
-uuid={version = "0.8",features=["v4"]}
-bigdecimal = "0.1.2"
+chrono={version="0.4",features=["serde"]}
+uuid={version = "0.8",features=["v4","serde"]}
+bigdecimal = {version="0.1.2",features=["serde"]}
 rand = "0.7.3"
 rand_chacha = "0.2.2"
 rust-argon2 = "0.8"
 base64 ="0.12.1"
 log = "0.4.8"
 simplelog = "0.8.0"
+serde ={version="1.0",features=["derive"]}

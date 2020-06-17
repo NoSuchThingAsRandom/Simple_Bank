@@ -9,7 +9,8 @@ edition = "2018"
 [dependencies]
 log = "0.4.8"
 simplelog = "0.8.0"
-base64 ="=0.12.1"
+chrono="0.4"
 rand = "0.7.3"
+serde_json ="1.0"
 network_listener={path="../network_listener"}
 database_handler={path="../database_handler"}

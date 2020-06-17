@@ -2,15 +2,18 @@ extern crate database_handler;
 extern crate network_listener;
 
 use std::error::Error;
+use std::process::exit;
 
 use log::error;
 use log::info;
 use log::trace;
 use log::warn;
 
+use database_handler::models::User;
 use database_handler::DbConnection;
 use network_listener::protos::message::{
-    Request, Request_AuthenticateType, Request_ResultType, Request_oneof_detailed_type,
+    Request, Request_AccountType, Request_AuthenticateType, Request_MiscType, Request_ResultType,
+    Request_TransactionType, Request_oneof_detailed_type,
 };
 use network_listener::{
     protos::message::Request_RequestType, Client, ADDRESS, DATA_ACCOUNTS_PORT, DATA_MISC_PORT,
@@ -72,6 +75,20 @@ impl Instance {
                             };
                         }
                         Request_RequestType::ACCOUNT => {
+                            match msg.detailed_type {
+                                Some(Request_oneof_detailed_type::account(
+                                    Request_AccountType::LIST_ACCOUNTS,
+                                )) => {}
+                                Some(Request_oneof_detailed_type::account(
+                                    Request_AccountType::ACCOUNT_INFO,
+                                )) => if let Err(e) = self.get_account_info(&msg) {},
+
+                                Some(Request_oneof_detailed_type::account(
+                                    Request_AccountType::NEW_ACCOUNT,
+                                )) => {}
+
+                                Some(_) | None => {}
+                            }
                             if let Err(e) = self.data_accounts.send_message(msg) {
                                 error!("Failed to make request to data accounts ({})", e);
                             };
@@ -81,73 +98,111 @@ impl Instance {
                                 error!("Failed to make request to data misc ({})", e);
                             };
                         }
+                        Request_RequestType::Result => {}
                     }
                 } else {
                     if msg.field_type == Request_RequestType::AUTHENTICATE {
-                        if msg.detailed_type
-                            == Some(Request_oneof_detailed_type::auth(
+                        match msg.detailed_type {
+                            Some(Request_oneof_detailed_type::auth(
                                 Request_AuthenticateType::LOGIN,
-                            ))
-                        {
-                            self.login(&msg);
-                        } else {
-                            //Create new user
-                            self.create_user(&msg);
+                            )) => {
+                                if let Err(e) = self.login(&msg) {
+                                    warn!(
+                                        "Failed to login client ({}) with error ({})",
+                                        msg.client_id, e
+                                    )
+                                };
+                            }
+                            Some(Request_oneof_detailed_type::auth(
+                                Request_AuthenticateType::NEW_USER,
+                            )) => {
+                                if let Err(e) = self.create_user(&msg) {
+                                    warn!(
+                                        "Failed to login client ({}) with error ({})",
+                                        msg.client_id, e
+                                    );
+                                };
+                            }
+                            Some(_) | None => {
+                                self.send_login_request(&msg);
+                            }
                         }
                     } else {
-                        //Send login request
-                        trace!("Message not authenticated, sending login request");
-                        let auth_req = Request {
-                            field_type: Request_RequestType::AUTHENTICATE,
-                            user_id: msg.user_id.clone(),
-                            client_id: msg.client_id.clone(),
-                            data: Default::default(),
-                            from_client: false,
-                            token_id: "".to_string(),
-                            detailed_type: Some(Request_oneof_detailed_type::auth(
-                                Request_AuthenticateType::LOGIN,
-                            )),
-                            unknown_fields: Default::default(),
-                            cached_size: Default::default(),
-                        };
-                        if self.network_server.send_message(auth_req).is_err() {
-                            warn!("Failed to send login message to {}", &msg.client_id);
-                        };
+                        self.send_login_request(&msg);
                     }
                 }
             }
-            /*
-            Currently not needed as all one one server/thread
-            //Forward outgoing messages from servers
-            for msg in self.data_accounts.get_messages() {
-                if let Err(e) = self.network_server.send_message(msg) {
-                    error!(
-                        "Failed to forward request from data accounts to network server ({})",
-                        e
-                    );
-                };
-            }
-            for msg in self.data_transactions.get_messages() {
-                if let Err(e) = self.network_server.send_message(msg) {
-                    error!(
-                        "Failed to forward request from data transactions to network server ({})",
-                        e
-                    );
-                };
-            }
-            for msg in self.data_misc.get_messages() {
-                if let Err(e) = self.network_server.send_message(msg) {
-                    error!(
-                        "Failed to forward request from data misc to network server ({})",
-                        e
-                    );
-                };
-            }*/
         }
     }
-    fn create_user(&mut self, msg: &Request) -> Result<(), Box<dyn Error>> {
+    fn send_critical_error(&mut self, client_id: String) -> Result<(), Box<dyn Error>> {
+        let request =
+            Request::success_result(Vec::new(), client_id, Request_ResultType::UNEXPECTED_ERROR)?;
+        self.network_server.send_message(request)?;
         Ok(())
     }
+    fn send_incorrect_arguments_error(&mut self, client_id: String) -> Result<(), Box<dyn Error>> {
+        let request = match Request::success_result(
+            Vec::new(),
+            client_id,
+            Request_ResultType::INVALID_ARGS,
+        ) {
+            Ok(req) => req,
+            Err(e) => {
+                self.send_critical_error(client_id.clone());
+                return Err(Box::new(e));
+            }
+        };
+        if let Err(e) = self.network_server.send_message(request) {
+            self.send_critical_error(client_id.clone());
+            return Err(Box::new(e));
+        };
+        Ok(())
+    }
+
+    fn send_login_request(&mut self, msg: &Request) {
+        //Send login request
+        trace!("Message not authenticated, sending login request");
+        let auth_req = Request {
+            field_type: Request_RequestType::AUTHENTICATE,
+            user_id: msg.user_id.clone(),
+            client_id: msg.client_id.clone(),
+            data: Default::default(),
+            from_client: false,
+            token_id: "".to_string(),
+            detailed_type: Some(Request_oneof_detailed_type::auth(
+                Request_AuthenticateType::LOGIN,
+            )),
+            unknown_fields: Default::default(),
+            cached_size: Default::default(),
+        };
+        if let Err(e) = self.network_server.send_message(auth_req) {
+            error!("Failed to send login message to {}", &msg.client_id);
+            self.send_critical_error(msg.client_id.clone()).unwrap();
+        }
+    }
+
+    fn create_user(&mut self, msg: &Request) -> Result<(), Box<dyn Error>> {
+        let mut user: User = serde_json::from_str(msg.data.get(0).unwrap())?;
+        user.user_uuid = database_handler::new_secure_uuid_v4();
+        user.join_date = chrono::Utc::today().naive_utc();
+        user.archived = false;
+        let a = if self.database_connection.new_user_account(&user).is_err() {
+            warn!("Failed to create new user");
+            if self
+                .send_incorrect_arguments_error(msg.client_id.clone())
+                .is_err()
+            {
+                self.send_critical_error();
+                Ok(())
+            } else {
+                Ok(())
+            }
+        } else {
+            Ok(())
+        };
+        Ok(())
+    }
+
     fn login(&mut self, msg: &Request) -> Result<(), Box<dyn Error>> {
         let token_req = self.database_connection.login(
             String::from(msg.data.get(0).ok_or("")?),
@@ -193,25 +248,13 @@ impl Instance {
             .check_token(msg.token_id.parse()?, msg.user_id.parse()?)?);
     }
 
-    fn process_authenticate_request(
-        &mut self,
-        msg: Request,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        //let token = Instance::generate_token();
-        Ok(())
-    }
-
-    fn process_accounts_request(&mut self, msg: Request) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
-    }
-    fn process_transactions_request(
-        &mut self,
-        msg: Request,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
-    }
-
-    fn process_misc_request(&mut self, msg: Request) -> Result<(), Box<dyn std::error::Error>> {
+    fn get_account_info(&mut self, msg: &Request) -> Result<(), Box<dyn Error>> {
+        let account = self
+            .database_connection
+            .get_bank_account(msg.data[0].parse()?, msg.user_id.parse()?)?;
+        let mut data: Vec<String> = Vec::new();
+        data.push(serde_json::to_string(&account)?);
+        Request::success_result(data, msg.client_id.clone(), Request_ResultType::SUCCESS)?;
         Ok(())
     }
 }

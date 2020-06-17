@@ -30,6 +30,7 @@ message Request {
         LOGIN = 0;
         NEW_USER = 1;
         CHANGE_PASSWORD = 2;
+        LOGOUT=3;
     }
     enum TransactionType {
         LIST_TRANSACTIONS = 0;

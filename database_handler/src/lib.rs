@@ -11,22 +11,41 @@ pub mod schema;
 
 use crate::models::{Account, Token, User};
 
-use diesel::pg::PgConnection;
-use diesel::prelude::*;
 use dotenv::dotenv;
-use log::{error, trace, warn};
-
-use rand::{RngCore, SeedableRng};
 use std::env;
+
+use log::warn;
+use rand::{RngCore, SeedableRng};
 
 use chrono::Duration;
 use uuid::{Builder, Uuid, Variant, Version};
 
+use diesel::pg::PgConnection;
+use diesel::prelude::*;
+use diesel::result::Error;
+
+//TODO Is it worth requiring a token for every request (In the database)
+//TODO Even though it should be authenticated from load_balancer?
+
+/// Holder for a database connection
 pub struct DbConnection {
     connection: PgConnection,
 }
 
 impl DbConnection {
+    /// Opens a new connection to the database
+    ///
+    /// The address is given by the .env file
+    ///
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    /// ```
+    /// #Panics
+    ///     .env file is invalid
+    ///     $DATABASE_URL is not set
     pub fn new_connection() -> DbConnection {
         dotenv().ok();
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
@@ -34,6 +53,39 @@ impl DbConnection {
             .expect(&format!("Failed connecting to DB {}", database_url));
         DbConnection { connection }
     }
+
+    /// Inserts a new user account to the database, using the given struct
+    ///
+    /// #Example
+    /// ```
+    /// use database_handler::models::User;
+    /// use database_handler::{new_secure_uuid_v4, DbConnection};
+    /// let user:User =User{
+    ///     user_uuid:new_secure_uuid_v4(),
+    ///     username:String::from("username"),
+    ///     password:String::from("password"),
+    ///     email:String::from("username@company.com"),
+    ///     date_of_birth:chrono::NaiveDate::from_ymd(1990,1,1),
+    ///     join_date:chrono::Utc::today().naive_utc(),
+    ///     archived:false
+    /// };
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    /// match connection.new_user_account(&user){
+    ///     Ok(_)=>println!("Added to database"),
+    ///     Err(e)=>{
+    ///         if e==diesel::NotFound{
+    ///             println!("Collision with existing account")
+    ///         } else {
+    ///             println!("Failure adding to database")
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// #Error
+    ///     Error(diesel::result::Error::NotFound) - Failed due to collisions
+    ///     Error(E) - Failed
     pub fn new_user_account(&mut self, details: &User) -> QueryResult<()> {
         DbConnection::check_query_processed(
             diesel::insert_into(schema::user_details::table)
@@ -41,26 +93,140 @@ impl DbConnection {
                 .execute(&self.connection),
         )
     }
-    pub fn new_bank_account(&mut self, details: Account) -> QueryResult<()> {
+    /// Inserts a new banck account to the database, using the given struct
+    ///
+    /// #Example
+    /// ```
+    /// use database_handler::models::Account;
+    /// use database_handler::{new_secure_uuid_v4, DbConnection};
+    ///
+    /// let user_uuid=new_secure_uuid_v4();
+    /// let account:Account =Account{
+    ///     account_number:12345678,
+    ///     user_uuid,
+    ///     balance:bigdecimal::BigDecimal::from(0),
+    ///     interest_rate:bigdecimal::BigDecimal::from(0),
+    ///     sort_code:123456,
+    ///     overdraft_limit:bigdecimal::BigDecimal::from(0),
+    ///     account_name:Some(String::from("Easy_Access_Saver")),
+    ///     account_category:Some(String::from("Savings")),
+    ///     archived:false
+    /// };
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    /// match connection.new_bank_account(&account){
+    ///     Ok(_)=>println!("Added to database"),
+    ///     Err(e)=>{
+    ///         if e==diesel::NotFound{
+    ///             println!("Collision with existing account")
+    ///         } else {
+    ///             println!("Failure adding to database")
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// ```
+    ///
+    /// #Error
+    ///     Error(diesel::result::Error::NotFound) - Failed due to collisions
+    ///     Error(E) - Failed
+    pub fn new_bank_account(&mut self, details: &Account) -> QueryResult<()> {
         DbConnection::check_query_processed(
             diesel::insert_into(schema::bank_accounts::table)
-                .values(&details)
+                .values(details)
                 .execute(&self.connection),
         )
     }
-    pub fn get_user_account(&mut self, user_uuid: uuid::Uuid) -> QueryResult<User> {
-        let res = schema::user_details::table
-            .find(user_uuid)
-            .get_result(&self.connection);
-        if res.is_err() {}
-        res
+    //TODO Switch to token
+    /// Retrieves a user_uuid from a username
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let username =String::from("some_uuid");
+    /// let mut connection = DbConnection::new_connection();
+    ///
+    /// let user = connection.get_user_account(user_uuid).unwrap();
+    /// ```
+    /// #Error
+    ///     Err(NotFound) - No user with that uuid found
+    pub fn get_user_uuid(&mut self, username: &String) -> QueryResult<Uuid> {
+        schema::user_details::table
+            .filter(schema::user_details::username.eq(username))
+            .select(schema::user_details::user_uuid)
+            .first(&self.connection)
     }
-    pub fn get_bank_account(&mut self, account_number: i32) -> QueryResult<Account> {
-        schema::bank_accounts::table
-            .find(account_number)
+
+    /// Retrieves user account details from a uuid
+    ///
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let user_uuid: uuid::Uuid ="some_uuid".parse().unwrap();
+    /// let mut connection = DbConnection::new_connection();
+    ///
+    /// let user = connection.get_user_account(user_uuid).unwrap();
+    /// ```
+    /// #Error
+    ///     Err(NotFound) - No user with that uuid found
+    pub fn get_user_account(&mut self, user_uuid: uuid::Uuid) -> QueryResult<User> {
+        schema::user_details::table
+            .find(user_uuid)
             .get_result(&self.connection)
     }
-    pub fn archive_user_account(&mut self, user_uuid: Uuid) -> QueryResult<()> {
+
+    /// Retrieves bank account details
+    ///
+    /// Gets the bank account matching the given account number,
+    /// AND the given user_uuid owning the account
+    ///
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let user_uuid: uuid::Uuid ="some_uuid".parse().unwrap();
+    /// let account_number: i32 = 12345678;
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    ///
+    /// let user = connection.get_bank_account(account_number,user_uuid).unwrap();
+    /// ```
+    /// #Error
+    ///     Err(NotFound) - No account with that number found
+    pub fn get_bank_account(
+        &mut self,
+        account_number: i32,
+        user_uuid: Uuid,
+    ) -> QueryResult<Account> {
+        schema::bank_accounts::table
+            .find(account_number)
+            .filter(schema::bank_accounts::user_uuid.eq(user_uuid))
+            .get_result(&self.connection)
+    }
+
+    /// Sets the archive flag on a user account, so that it can no longer be modified
+    ///
+    /// Only the user that owns the account can modify the archive flag
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let username=String::from("username");
+    /// let password=String::from("password");
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    /// let user_uuid: uuid::Uuid = connection.get_user_uuid(&username).unwrap();
+    /// let token = connection.login(&username,&password).unwrap().unwrap();
+    ///
+    /// let user = connection.archive_user_account(user_uuid,token).unwrap();
+    /// ```
+    /// #Error
+    ///     Err(NotFound) - No user with that uuid found
+    pub fn archive_user_account(&mut self, user_uuid: Uuid, token: String) -> QueryResult<()> {
+        if !self.check_token(token, user_uuid)? {
+            return Err(diesel::NotFound);
+        }
         let user: User = schema::user_details::table
             .filter(schema::user_details::user_uuid.eq(user_uuid))
             .first(&self.connection)?;
@@ -76,7 +242,28 @@ impl DbConnection {
             .execute(&self.connection),
         )
     }
-    pub fn delete_user_account(&mut self, user_uuid: Uuid) -> QueryResult<()> {
+    /// Permantly removes the user account from the database
+    ///
+    /// Can only be done by the user that owns the account
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let username=String::from("username");
+    /// let password=String::from("password");
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    /// let user_uuid: uuid::Uuid = connection.get_user_uuid(&username).unwrap();
+    /// let token = connection.login(&username,&password).unwrap().unwrap();
+    ///
+    /// let user = connection.delete_user_account(user_uuid,token).unwrap();
+    /// ```
+    /// #Error
+    ///     Err(NotFound) - No user with that uuid found
+    pub fn delete_user_account(&mut self, user_uuid: Uuid, token: String) -> QueryResult<()> {
+        if !self.check_token(token, user_uuid)? {
+            return Err(diesel::NotFound);
+        }
         DbConnection::check_query_processed(
             diesel::delete(
                 schema::user_details::table.filter(schema::user_details::user_uuid.eq(user_uuid)),
@@ -84,27 +271,39 @@ impl DbConnection {
             .execute(&self.connection),
         )
     }
-    fn get_user_uuid(&mut self, username: String) -> QueryResult<Uuid> {
-        schema::user_details::table
-            .filter(schema::user_details::username.eq(username))
-            .select(schema::user_details::user_uuid)
-            .first(&self.connection)
-    }
+    /// Helper function for ensuring that a record is updated
     fn check_query_processed(query: QueryResult<usize>) -> QueryResult<()> {
         if let Ok(rows) = query {
-            if rows > 0 {
-                return Ok(());
+            return if rows > 0 {
+                Ok(())
             } else {
-                panic!("No rows updated")
-            }
+                Err(Error::NotFound)
+            };
         }
         Err(query.err().expect("Failed to unwrap error"))
     }
-    /** Checks if a given token is valid for the given user
-        Ok(True) - The token is valid
-        Ok(False) -  The token has expired/invalid
-        Err - The token doesn't exist/unexpected error
-    **/
+    /// Checks if a given token is valid for the given user
+    ///
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let username=String::from("username");
+    /// let password=String::from("password");
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    /// let user_uuid: uuid::Uuid = connection.get_user_uuid(&username).unwrap();
+    /// let token = connection.login(&username,&password).unwrap().unwrap();
+    ///
+    /// let result = connection.check_token(token,user_uuid);    
+    /// ```
+    /// #Returns
+    /// Ok(True) - The token is valid
+    ///
+    /// Ok(False) -  The token has expired/invalid
+    ///
+    /// #Error
+    /// Err - The token doesn't exist/unexpected error
     pub fn check_token(&mut self, token_id: String, client_id: Uuid) -> QueryResult<bool> {
         let token: Token = schema::tokens::table
             .filter(schema::tokens::token.eq(token_id))
@@ -127,6 +326,15 @@ impl DbConnection {
         }
         return Ok(true);
     }
+    /// Creates a new token
+    ///
+    /// Uses rand chacha with 20 rounds
+    ///
+    /// Token is 32 bytes in length and base64 encodes
+    /// #Example
+    /// ```
+    /// let token: String = generate_token();
+    /// ```
     fn generate_token() -> String {
         let mut bytes: [u8; 32] = [0; 32];
         let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
@@ -134,7 +342,39 @@ impl DbConnection {
         base64::encode(bytes)
     }
 
-    pub fn update_password(&mut self, user_uuid: Uuid, password: String) -> QueryResult<bool> {
+    /// Updates a user's password
+    ///
+    /// Sets the password of the user with the given uuid, to a hashed version of the password
+    /// Requires a valid token for that user to be executed
+    ///
+    ///#Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let username=String::from("username");
+    /// let old_password=String::from("password");
+    /// let new_password=String::from("password");
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    /// let user_uuid: uuid::Uuid = connection.get_user_uuid(&username).unwrap();
+    /// let token = connection.login(&username,&old_password).unwrap().unwrap();
+    ///
+    /// connection.update_password(token,user_uuid,new_password);
+    /// ```
+    ///
+    /// #Error
+    ///     Err(NotFound) - Could not find that user in the database
+    pub fn update_password(
+        &mut self,
+        token: String,
+        user_uuid: Uuid,
+        password: String,
+    ) -> QueryResult<bool> {
+        //Checks for authentication
+        if !self.check_token(token, user_uuid)? {
+            return Err(diesel::NotFound);
+        }
+
         let hash = DbConnection::hash_password(password);
         let result = diesel::update(
             schema::user_details::table.filter(schema::user_details::user_uuid.eq(user_uuid)),
@@ -148,29 +388,39 @@ impl DbConnection {
                 //TODO Remove panic
                 panic!("Updated more than one password!");
             } else {
-                Ok(false)
+                Err(diesel::NotFound)
             }
         } else {
             Err(result.err().unwrap())
         };
     }
 
-    /**
-        If the username and password are correct, returns a Ok(Some(authentication key))
-        If the username and password are incorrect retunrs Ok(None)
-        Otherwise returns the error encountered
-    **/
-    pub fn login(&mut self, username: String, password: String) -> QueryResult<Option<String>> {
+    /// Checks the username and password are correct, and returns a token valid for 30 minutes
+    ///
+    ///
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let username=String::from("username");
+    /// let password=String::from("password");
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    ///
+    /// let token = connection.login(&username,&password).unwrap().unwrap();
+    /// ```
+    /// #Errors
+    ///     Err(NotFound) - The username or password don't match
+    pub fn login(&mut self, username: &String, password: &String) -> QueryResult<String> {
         let hashed: Result<String, diesel::result::Error> = schema::user_details::table
             .filter(schema::user_details::username.eq(&username))
             .select(schema::user_details::password)
             .first(&self.connection);
         if let Err(e) = hashed {
             if e == diesel::result::Error::NotFound {
-                trace!("Invalid username");
-                return Ok(None);
+                return Err(diesel::NotFound);
             }
-            error!("Unexpected error logging in {}", e);
+            warn!("Unexpected error logging in {}", e);
             return Err(e);
         }
         if argon2::verify_encoded(&hashed.unwrap(), password.as_bytes()).unwrap() {
@@ -188,18 +438,23 @@ impl DbConnection {
                 .values(insert_token)
                 .execute(&self.connection);
             if rows == Ok(1) {
-                trace!("Created token");
-                Ok(Some(token))
+                Ok(token)
             } else {
-                trace!("Failed to create token");
-                Ok(None)
+                panic!("Created more than one token");
             }
         } else {
-            trace!("Invalid password");
-            Ok(None)
+            return Err(diesel::NotFound);
         }
     }
 
+    /// Hashes a password using argon2
+    ///
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    /// let password = String::from("password");
+    /// let hashed = DbConnection::hash_password(password);
+    /// ```
     pub fn hash_password(password: String) -> String {
         let b_password = password.as_bytes();
         let mut salt: [u8; 16] = [0; 16];
@@ -211,10 +466,12 @@ impl DbConnection {
     }
 }
 
-/** Generates a new unique uuid
-    Uses secure random
-
-**/
+/// Generates a new unique uuid
+/// #Example
+/// ```
+/// use database_handler::new_secure_uuid_v4;
+/// let uuid= new_secure_uuid_v4();
+/// ```
 pub fn new_secure_uuid_v4() -> Uuid {
     let mut bytes = [0; 16];
     let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
@@ -232,10 +489,6 @@ mod user_accounts_test {
     use crate::models::User;
     use crate::{new_secure_uuid_v4, DbConnection};
     use chrono::Utc;
-    use log::LevelFilter;
-    use log::{error, trace, warn};
-    use simplelog::{ConfigBuilder, TermLogger, TerminalMode};
-    use std::str::FromStr;
 
     const USER_UUID_1: &str = "e78836e9-1982-4380-a678-a5b4db33d205";
     const USER_UUID_2: &str = "abe8e4bb-c87a-48ff-a4fb-2ebd42745aae";
@@ -254,7 +507,6 @@ mod user_accounts_test {
     }
 
     fn check_user_exists(user: &User) {
-        trace!("Starting l");
         let mut con = DbConnection::new_connection();
         if con.get_user_account(user.user_uuid).is_err() {
             con.new_user_account(&user).unwrap();
@@ -275,7 +527,9 @@ mod user_accounts_test {
         };
         let mut con = DbConnection::new_connection();
         assert!(con.new_user_account(&user).is_ok());
-        assert!(con.delete_user_account(user.user_uuid).is_ok());
+
+        let token = con.login(&user.username, &user.password).unwrap();
+        assert!(con.delete_user_account(user.user_uuid, token).is_ok());
     }
 
     #[test]
@@ -285,11 +539,9 @@ mod user_accounts_test {
         let password = user.password.clone();
         check_user_exists(&user);
         let mut con = DbConnection::new_connection();
-        let token_res = con.login(username, password);
+        let token_res = con.login(&username, &password);
         assert!(token_res.is_ok());
-        let token_opt = token_res.unwrap();
-        assert!(token_opt.is_some());
-        let token = token_opt.unwrap();
+        let token = token_res.unwrap();
         let check_token = con.check_token(token, user.user_uuid);
         assert!(check_token.is_ok());
         assert!(check_token.unwrap());
@@ -316,8 +568,9 @@ mod user_accounts_test {
             join_date: Utc::today().naive_utc(),
             archived: false,
         };
-        con.new_user_account(&user);
-        assert!(con.archive_user_account(user_id).is_ok());
-        con.delete_user_account(user_id).unwrap();
+        con.new_user_account(&user).unwrap();
+        let token = con.login(&user.username, &user.password).unwrap();
+        assert!(con.archive_user_account(user_id, token.clone()).is_ok());
+        con.delete_user_account(user_id, token.clone()).unwrap();
     }
 }
