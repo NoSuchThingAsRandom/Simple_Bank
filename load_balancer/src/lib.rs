@@ -1,16 +1,16 @@
 extern crate database_handler;
 extern crate network_listener;
 
-use std::error::Error;
-use std::process::exit;
+use std::fmt;
+use std::fmt::Formatter;
 
 use log::error;
 use log::info;
 use log::trace;
 use log::warn;
 
-use database_handler::models::User;
-use database_handler::DbConnection;
+use database_handler::models::{Account, User};
+use database_handler::{DatabaseError, DatabaseErrorKind};
 use network_listener::protos::message::{
     Request, Request_AccountType, Request_AuthenticateType, Request_MiscType, Request_ResultType,
     Request_TransactionType, Request_oneof_detailed_type,
@@ -20,14 +20,102 @@ use network_listener::{
     DATA_TRANSACTIONS_PORT, LOAD_BALANCER_PORT,
 };
 
+struct RequestError {
+    error_kind: ErrorKind,
+}
+
+impl RequestError {
+    fn new(error_kind: ErrorKind) -> RequestError {
+        RequestError { error_kind }
+    }
+
+    fn from_database_error(error: DatabaseError) -> RequestError {
+        match error.error_kind {
+            database_handler::DatabaseErrorKind::AlreadyExists => {
+                RequestError::new(ErrorKind::InvalidArguments)
+            }
+
+            DatabaseErrorKind::AuthenticationError => {
+                RequestError::new(ErrorKind::NotAuthenticated)
+            }
+            DatabaseErrorKind::DatabaseFailure => RequestError::new(ErrorKind::DatabaseFailure),
+            DatabaseErrorKind::Unknown => RequestError::new(ErrorKind::DatabaseFailure),
+            DatabaseErrorKind::NotFound => RequestError::new(ErrorKind::InvalidArguments),
+        }
+    }
+    fn process(&mut self, instance: &mut Instance, client_id: String) -> bool {
+        match self.error_kind {
+            ErrorKind::NotAuthenticated => {
+                if instance.send_authentication_error(client_id).is_err() {
+                    error!("The network connection has failed");
+                    return false;
+                }
+            }
+
+            ErrorKind::DatabaseFailure => {
+                panic!("The database has crashed!");
+            }
+            ErrorKind::Shutdown => {
+                instance.database_connection.close();
+                return false;
+            }
+            ErrorKind::InvalidArguments => {
+                if instance.send_incorrect_arguments_error(client_id).is_err() {
+                    error!("The network connection has failed");
+                    return false;
+                }
+            }
+            ErrorKind::NetworkFailure => {
+                error!("The network connection has failed!");
+                return false;
+            }
+        };
+        true
+    }
+}
+
+impl fmt::Display for RequestError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.error_kind {
+            ErrorKind::NotAuthenticated => write!(f, "The request was not authenticated properly!"),
+            ErrorKind::InvalidArguments => write!(f, "Invalid arguments were provided"),
+            ErrorKind::DatabaseFailure => write!(
+                f,
+                "An unexpected error occurred with the database connection"
+            ),
+            ErrorKind::NetworkFailure => write!(
+                f,
+                "An unexpected error occurred with the network connection"
+            ),
+            ErrorKind::Shutdown => write!(f, "Need to shutdown"),
+        }
+    }
+}
+
+impl fmt::Debug for RequestError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl std::error::Error for RequestError {}
+
+enum ErrorKind {
+    NotAuthenticated,
+    InvalidArguments,
+    DatabaseFailure,
+    NetworkFailure,
+    Shutdown,
+}
+
 //TODO Prevent against timing attacks
 //https://blog.ircmaxell.com/2014/11/its-all-about-time.html
 pub struct Instance {
     network_server: network_listener::Server,
     database_connection: database_handler::DbConnection,
-    data_accounts: Client,
+    /*    data_accounts: Client,
     data_transactions: Client,
-    data_misc: Client,
+    data_misc: Client,*/
 }
 
 impl Instance {
@@ -39,127 +127,127 @@ impl Instance {
         Instance {
             network_server: network,
             database_connection: database_handler::DbConnection::new_connection(),
-            data_accounts: Instance::start_client(DATA_ACCOUNTS_PORT),
+            /*            data_accounts: Instance::start_client(DATA_ACCOUNTS_PORT),
             data_transactions: Instance::start_client(DATA_TRANSACTIONS_PORT),
-            data_misc: Instance::start_client(DATA_MISC_PORT),
+            data_misc: Instance::start_client(DATA_MISC_PORT),*/
         }
     }
-    fn start_client(port: &str) -> Client {
-        let mut address = String::from(ADDRESS);
-        address.push_str(port);
-        network_listener::Client::start(address)
-    }
-
+    /// Function that pulls request from the mpsc queue, and validates the authentication
     pub fn start(&mut self) {
         loop {
             //Get incoming client messages
-            for msg in self.network_server.get_messages() {
-                if match self.token_is_valid(&msg) {
-                    Ok(auth) => auth,
-                    Err(e) => {
-                        warn!("Failed to verify auth {}", e);
-                        false
+            for mut msg in self.network_server.get_messages() {
+                //Check if user wishes to login
+                if msg.field_type == Request_RequestType::AUTHENTICATE {
+                    match msg.detailed_type {
+                        Some(Request_oneof_detailed_type::auth(
+                            Request_AuthenticateType::LOGIN,
+                        )) => {
+                            if let Err(mut e) = self.login(&msg) {
+                                trace!(
+                                    "Failed to login client ({}) with error ({})",
+                                    msg.client_id,
+                                    e
+                                );
+                                if e.process(self, msg.client_id) {
+                                    return;
+                                }
+                            };
+                            continue;
+                        }
+                        Some(Request_oneof_detailed_type::auth(
+                            Request_AuthenticateType::NEW_USER,
+                        )) => {
+                            if let Err(mut e) = self.create_user(&msg) {
+                                trace!(
+                                    "Failed to login client ({}) with error ({})",
+                                    msg.client_id,
+                                    e
+                                );
+                                if e.process(self, msg.client_id) {
+                                    return;
+                                }
+                            };
+                            continue;
+                        }
+                        Some(_) | None => {}
                     }
-                } {
-                    //Parse user request
-                    match msg.field_type {
-                        Request_RequestType::SHUTDOWN => {}
-                        Request_RequestType::AUTHENTICATE => {
-                            if let Err(e) = self.data_accounts.send_message(msg) {
-                                error!("Failed to make request to data accounts ({})", e);
-                            };
+                }
+                if let Err(e) = self.token_is_valid(&mut msg) {
+                    trace!("Failed to verify auth {}", e);
+                    if let Err(mut e) = self.send_login_request(&msg) {
+                        if e.process(self, msg.client_id) {
+                            return;
                         }
-                        Request_RequestType::TRANSACTIONS => {
-                            if let Err(e) = self.data_transactions.send_message(msg) {
-                                error!("Failed to make request to data transactions ({})", e);
-                            };
-                        }
-                        Request_RequestType::ACCOUNT => {
-                            match msg.detailed_type {
-                                Some(Request_oneof_detailed_type::account(
-                                    Request_AccountType::LIST_ACCOUNTS,
-                                )) => {}
-                                Some(Request_oneof_detailed_type::account(
-                                    Request_AccountType::ACCOUNT_INFO,
-                                )) => if let Err(e) = self.get_account_info(&msg) {},
-
-                                Some(Request_oneof_detailed_type::account(
-                                    Request_AccountType::NEW_ACCOUNT,
-                                )) => {}
-
-                                Some(_) | None => {}
-                            }
-                            if let Err(e) = self.data_accounts.send_message(msg) {
-                                error!("Failed to make request to data accounts ({})", e);
-                            };
-                        }
-                        Request_RequestType::MISC => {
-                            if let Err(e) = self.data_misc.send_message(msg) {
-                                error!("Failed to make request to data misc ({})", e);
-                            };
-                        }
-                        Request_RequestType::Result => {}
                     }
                 } else {
-                    if msg.field_type == Request_RequestType::AUTHENTICATE {
-                        match msg.detailed_type {
-                            Some(Request_oneof_detailed_type::auth(
-                                Request_AuthenticateType::LOGIN,
-                            )) => {
-                                if let Err(e) = self.login(&msg) {
-                                    warn!(
-                                        "Failed to login client ({}) with error ({})",
-                                        msg.client_id, e
-                                    )
-                                };
-                            }
-                            Some(Request_oneof_detailed_type::auth(
-                                Request_AuthenticateType::NEW_USER,
-                            )) => {
-                                if let Err(e) = self.create_user(&msg) {
-                                    warn!(
-                                        "Failed to login client ({}) with error ({})",
-                                        msg.client_id, e
-                                    );
-                                };
-                            }
-                            Some(_) | None => {
-                                self.send_login_request(&msg);
-                            }
+                    if let Err(mut e) = self.parse_request(&msg) {
+                        if e.process(self, msg.client_id) {
+                            return;
                         }
-                    } else {
-                        self.send_login_request(&msg);
                     }
                 }
             }
         }
     }
-    fn send_critical_error(&mut self, client_id: String) -> Result<(), Box<dyn Error>> {
-        let request =
-            Request::success_result(Vec::new(), client_id, Request_ResultType::UNEXPECTED_ERROR)?;
-        self.network_server.send_message(request)?;
+
+    /// This executes the given request
+    fn parse_request(&mut self, msg: &Request) -> Result<(), RequestError> {
+        match msg.field_type {
+            Request_RequestType::SHUTDOWN => {}
+            Request_RequestType::AUTHENTICATE => {}
+            Request_RequestType::TRANSACTIONS => {}
+            Request_RequestType::ACCOUNT => match msg.detailed_type {
+                Some(Request_oneof_detailed_type::account(Request_AccountType::LIST_ACCOUNTS)) => {}
+                Some(Request_oneof_detailed_type::account(Request_AccountType::ACCOUNT_INFO)) => {
+                    return self.get_account_info(&msg);
+                }
+
+                Some(Request_oneof_detailed_type::account(Request_AccountType::NEW_ACCOUNT)) => {}
+
+                Some(_) | None => {}
+            },
+            Request_RequestType::MISC => {}
+            Request_RequestType::Result => {}
+        }
         Ok(())
     }
-    fn send_incorrect_arguments_error(&mut self, client_id: String) -> Result<(), Box<dyn Error>> {
-        let request = match Request::success_result(
+    fn send_incorrect_arguments_error(&mut self, client_id: String) -> Result<(), RequestError> {
+        let request = Request::success_result(
             Vec::new(),
-            client_id,
+            client_id.clone(),
             Request_ResultType::INVALID_ARGS,
-        ) {
-            Ok(req) => req,
-            Err(e) => {
-                self.send_critical_error(client_id.clone());
-                return Err(Box::new(e));
-            }
-        };
-        if let Err(e) = self.network_server.send_message(request) {
-            self.send_critical_error(client_id.clone());
-            return Err(Box::new(e));
-        };
-        Ok(())
+        );
+        if self.network_server.send_message(request).is_err() {
+            Err(RequestError::new(ErrorKind::NetworkFailure))
+        } else {
+            Ok(())
+        }
+    }
+    fn send_authentication_error(&mut self, client_id: String) -> Result<(), RequestError> {
+        let request = Request::success_result(
+            Vec::new(),
+            client_id.clone(),
+            Request_ResultType::NOT_AUTHENTICATED,
+        );
+        if self.network_server.send_message(request).is_err() {
+            Err(RequestError::new(ErrorKind::NetworkFailure))
+        } else {
+            Ok(())
+        }
     }
 
-    fn send_login_request(&mut self, msg: &Request) {
+    fn send_critical_error(&mut self, client_id: String) -> Result<(), RequestError> {
+        let request =
+            Request::success_result(Vec::new(), client_id, Request_ResultType::UNEXPECTED_ERROR);
+        if self.network_server.send_message(request).is_err() {
+            Err(RequestError::new(ErrorKind::NetworkFailure))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn send_login_request(&mut self, msg: &Request) -> Result<(), RequestError> {
         //Send login request
         trace!("Message not authenticated, sending login request");
         let auth_req = Request {
@@ -175,86 +263,115 @@ impl Instance {
             unknown_fields: Default::default(),
             cached_size: Default::default(),
         };
-        if let Err(e) = self.network_server.send_message(auth_req) {
-            error!("Failed to send login message to {}", &msg.client_id);
-            self.send_critical_error(msg.client_id.clone()).unwrap();
+        if self.network_server.send_message(auth_req).is_err() {
+            Err(RequestError::new(ErrorKind::NetworkFailure))
+        } else {
+            Ok(())
         }
     }
 
-    fn create_user(&mut self, msg: &Request) -> Result<(), Box<dyn Error>> {
-        let mut user: User = serde_json::from_str(msg.data.get(0).unwrap())?;
+    fn create_user(&mut self, msg: &Request) -> Result<(), RequestError> {
+        let user_string = msg
+            .data
+            .get(0)
+            .ok_or(RequestError::new(ErrorKind::InvalidArguments))?;
+
+        let mut user: User = serde_json::from_str(user_string).unwrap();
         user.user_uuid = database_handler::new_secure_uuid_v4();
         user.join_date = chrono::Utc::today().naive_utc();
         user.archived = false;
-        let a = if self.database_connection.new_user_account(&user).is_err() {
-            warn!("Failed to create new user");
-            if self
-                .send_incorrect_arguments_error(msg.client_id.clone())
-                .is_err()
-            {
-                self.send_critical_error();
-                Ok(())
-            } else {
-                Ok(())
-            }
+        if let Err(e) = self.database_connection.new_user_account(&user) {
+            Err(RequestError::from_database_error(e))
         } else {
             Ok(())
-        };
-        Ok(())
+        }
     }
 
-    fn login(&mut self, msg: &Request) -> Result<(), Box<dyn Error>> {
+    fn login(&mut self, msg: &Request) -> Result<(), RequestError> {
         let token_req = self.database_connection.login(
-            String::from(msg.data.get(0).ok_or("")?),
-            String::from(msg.data.get(0).ok_or("")?),
+            &String::from(
+                msg.data
+                    .get(0)
+                    .ok_or(RequestError::new(ErrorKind::InvalidArguments))?,
+            ),
+            &String::from(
+                msg.data
+                    .get(0)
+                    .ok_or(RequestError::new(ErrorKind::InvalidArguments))?,
+            ),
         );
 
         let result: Request = match token_req {
-            Ok(token_opt) => match token_opt {
-                Some(token) => {
-                    let mut data = Vec::new();
-                    data.push(token);
-                    Request::success_result(
-                        data,
-                        msg.client_id.clone(),
-                        Request_ResultType::SUCCESS,
-                    )?
-                }
-                None => Request::success_result(
-                    Vec::new(),
-                    msg.client_id.clone(),
-                    Request_ResultType::INVALID_ARGS,
-                )?,
-            },
+            Ok(token) => {
+                let mut data = Vec::new();
+                data.push(token);
+                Request::success_result(data, msg.client_id.clone(), Request_ResultType::SUCCESS)
+            }
 
-            Err(E) => Request::success_result(
+            Err(_) => Request::success_result(
                 Vec::new(),
                 msg.client_id.clone(),
                 Request_ResultType::UNEXPECTED_ERROR,
-            )?,
+            ),
         };
-        self.network_server.send_message(result)?;
+        self.network_server.send_message(result);
         Ok(())
     }
 
-    /** Validates a token
-            Ok(True) - The token is valid
-            Ok(False) -  The token has expired/invalid
-            Err - The token doesn't exist/unexpected error
-    **/
-    fn token_is_valid(&mut self, msg: &Request) -> Result<bool, Box<dyn std::error::Error>> {
-        return Ok(self
-            .database_connection
-            .check_token(msg.token_id.parse()?, msg.user_id.parse()?)?);
+    /// Validates a token given by the user
+    ///
+    /// If it is valid, it will set the user_uuid on the request
+    /// to the matching user_uuid of the token
+    ///
+    /// #Return
+    ///     Ok(True) - The token is valid
+    ///     Ok(False) -  The token has expired/invalid
+    ///     Err - The token doesn't exist/unexpected error
+    fn token_is_valid(&mut self, msg: &mut Request) -> Result<(), RequestError> {
+        return match self.database_connection.check_token(msg.token_id.clone()) {
+            Ok(uuid) => {
+                msg.user_id = uuid;
+                Ok(())
+            }
+            Err(e) => Err(RequestError::new(ErrorKind::InvalidArguments)),
+        };
+    }
+    fn get_account_info(&mut self, msg: &Request) -> Result<(), RequestError> {
+        let account = match self.database_connection.get_bank_account(
+            msg.data[0]
+                .parse()
+                .map_err(|_e| RequestError::new(ErrorKind::InvalidArguments))?,
+            msg.user_id
+                .parse()
+                .map_err(|_e| RequestError::new(ErrorKind::InvalidArguments))?,
+        ) {
+            Ok(account) => account,
+            Err(e) => return Err(RequestError::from_database_error(e)),
+        };
+        let mut data: Vec<String> = Vec::new();
+        data.push(
+            serde_json::to_string(&account)
+                .map_err(|_e| RequestError::new(ErrorKind::InvalidArguments))?,
+        );
+        self.network_server
+            .send_message(Request::success_result(
+                data,
+                msg.client_id.clone(),
+                Request_ResultType::SUCCESS,
+            ))
+            .map_err(|_e| RequestError::new(ErrorKind::NetworkFailure))
     }
 
-    fn get_account_info(&mut self, msg: &Request) -> Result<(), Box<dyn Error>> {
-        let account = self
-            .database_connection
-            .get_bank_account(msg.data[0].parse()?, msg.user_id.parse()?)?;
-        let mut data: Vec<String> = Vec::new();
-        data.push(serde_json::to_string(&account)?);
-        Request::success_result(data, msg.client_id.clone(), Request_ResultType::SUCCESS)?;
+    fn new_account(&mut self, msg: &Request) -> Result<(), RequestError> {
+        let account_str = msg
+            .data
+            .get(0)
+            .ok_or(RequestError::new(ErrorKind::InvalidArguments))?;
+        let mut account: Account = serde_json::from_str(account_str).unwrap();
+        account.user_uuid = msg
+            .user_id
+            .parse()
+            .map_err(|_e| RequestError::new(ErrorKind::NotAuthenticated))?;
         Ok(())
     }
 }

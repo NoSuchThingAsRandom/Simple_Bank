@@ -52,7 +52,7 @@ impl Request {
         data: Vec<String>,
         client: String,
         result_type: Request_ResultType,
-    ) -> Result<Request, std::io::Error> {
+    ) -> Request {
         let message = Request {
             field_type: Request_RequestType::Result,
             user_id: Default::default(),
@@ -64,7 +64,7 @@ impl Request {
             unknown_fields: protobuf::UnknownFields::new(),
             cached_size: Default::default(),
         };
-        Ok(message)
+        message
     }
     pub fn shutdown() -> Request {
         Request {

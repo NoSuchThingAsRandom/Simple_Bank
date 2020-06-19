@@ -33,8 +33,4 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(
-    bank_accounts,
-    tokens,
-    user_details,
-);
+allow_tables_to_appear_in_same_query!(bank_accounts, tokens, user_details,);

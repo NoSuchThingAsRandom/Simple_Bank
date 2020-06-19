@@ -51,5 +51,6 @@ message Request {
         SUCCESS = 0;
         INVALID_ARGS=1;
         UNEXPECTED_ERROR=2;
+        NOT_AUTHENTICATED=3;
     }
 }

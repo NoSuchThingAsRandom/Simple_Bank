@@ -12,7 +12,7 @@ pub mod schema;
 use crate::models::{Account, Token, User};
 
 use dotenv::dotenv;
-use std::env;
+use std::{env, fmt};
 
 use log::warn;
 use rand::{RngCore, SeedableRng};
@@ -23,6 +23,8 @@ use uuid::{Builder, Uuid, Variant, Version};
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use diesel::result::Error;
+use serde::export::Formatter;
+use std::convert::TryInto;
 
 //TODO Is it worth requiring a token for every request (In the database)
 //TODO Even though it should be authenticated from load_balancer?
@@ -32,6 +34,47 @@ pub struct DbConnection {
     connection: PgConnection,
 }
 
+pub struct DatabaseError {
+    pub error_kind: DatabaseErrorKind,
+}
+impl DatabaseError {
+    fn new(errorKind: DatabaseErrorKind) -> DatabaseError {
+        DatabaseError {
+            error_kind: errorKind,
+        }
+    }
+}
+impl fmt::Display for DatabaseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.error_kind {
+            DatabaseErrorKind::AuthenticationError => {
+                write!(f, "The request was not authenticated properly!")
+            }
+            DatabaseErrorKind::AlreadyExists => {
+                write!(f, "A record with those unique fields already exists!")
+            }
+            DatabaseErrorKind::DatabaseFailure => write!(
+                f,
+                "An unexpected error occured with the database connection"
+            ),
+            DatabaseErrorKind::Unknown => write!(f, "Unknown failure"),
+            DatabaseErrorKind::NotFound => write!(f, "The record was not found!"),
+        }
+    }
+}
+impl fmt::Debug for DatabaseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        unimplemented!()
+    }
+}
+impl std::error::Error for DatabaseError {}
+pub enum DatabaseErrorKind {
+    AuthenticationError,
+    NotFound,
+    AlreadyExists,
+    DatabaseFailure,
+    Unknown,
+}
 impl DbConnection {
     /// Opens a new connection to the database
     ///
@@ -54,6 +97,8 @@ impl DbConnection {
         DbConnection { connection }
     }
 
+    //TODO Implement close function
+    pub fn close(&mut self) {}
     /// Inserts a new user account to the database, using the given struct
     ///
     /// #Example
@@ -86,7 +131,7 @@ impl DbConnection {
     /// #Error
     ///     Error(diesel::result::Error::NotFound) - Failed due to collisions
     ///     Error(E) - Failed
-    pub fn new_user_account(&mut self, details: &User) -> QueryResult<()> {
+    pub fn new_user_account(&mut self, details: &User) -> Result<(), DatabaseError> {
         DbConnection::check_query_processed(
             diesel::insert_into(schema::user_details::table)
                 .values(details)
@@ -130,7 +175,7 @@ impl DbConnection {
     /// #Error
     ///     Error(diesel::result::Error::NotFound) - Failed due to collisions
     ///     Error(E) - Failed
-    pub fn new_bank_account(&mut self, details: &Account) -> QueryResult<()> {
+    pub fn new_bank_account(&mut self, details: &Account) -> Result<(), DatabaseError> {
         DbConnection::check_query_processed(
             diesel::insert_into(schema::bank_accounts::table)
                 .values(details)
@@ -198,11 +243,21 @@ impl DbConnection {
         &mut self,
         account_number: i32,
         user_uuid: Uuid,
-    ) -> QueryResult<Account> {
-        schema::bank_accounts::table
+    ) -> Result<Account, DatabaseError> {
+        match schema::bank_accounts::table
             .find(account_number)
             .filter(schema::bank_accounts::user_uuid.eq(user_uuid))
             .get_result(&self.connection)
+        {
+            Ok(account) => Ok(account),
+            Err(e) => {
+                if e == diesel::result::Error::NotFound {
+                    Err(DatabaseError::new(DatabaseErrorKind::NotFound))
+                } else {
+                    Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
+                }
+            }
+        }
     }
 
     /// Sets the archive flag on a user account, so that it can no longer be modified
@@ -222,17 +277,27 @@ impl DbConnection {
     /// let user = connection.archive_user_account(user_uuid,token).unwrap();
     /// ```
     /// #Error
-    ///     Err(NotFound) - No user with that uuid found
-    pub fn archive_user_account(&mut self, user_uuid: Uuid, token: String) -> QueryResult<()> {
-        if !self.check_token(token, user_uuid)? {
-            return Err(diesel::NotFound);
+    ///     DatabaseError -
+    pub fn archive_user_account(
+        &mut self,
+        user_uuid: Uuid,
+        token: String,
+    ) -> Result<(), DatabaseError> {
+        let token_user_uuid: String = self.check_token(token)?;
+        if !token_user_uuid.eq(&user_uuid.to_string()) {
+            return Err(DatabaseError::new(DatabaseErrorKind::AuthenticationError));
         }
-        let user: User = schema::user_details::table
+        let user: User = if let Ok(_user) = schema::user_details::table
             .filter(schema::user_details::user_uuid.eq(user_uuid))
-            .first(&self.connection)?;
+            .first(&self.connection)
+        {
+            _user
+        } else {
+            return Err(DatabaseError::new(DatabaseErrorKind::NotFound));
+        };
         if user.archived {
             warn!("User has already been archived! ");
-            return Err(diesel::result::Error::NotFound);
+            return Err(DatabaseError::new(DatabaseErrorKind::AlreadyExists));
         }
         DbConnection::check_query_processed(
             diesel::update(
@@ -260,9 +325,14 @@ impl DbConnection {
     /// ```
     /// #Error
     ///     Err(NotFound) - No user with that uuid found
-    pub fn delete_user_account(&mut self, user_uuid: Uuid, token: String) -> QueryResult<()> {
-        if !self.check_token(token, user_uuid)? {
-            return Err(diesel::NotFound);
+    pub fn delete_user_account(
+        &mut self,
+        user_uuid: Uuid,
+        token: String,
+    ) -> Result<(), DatabaseError> {
+        let token_user_uuid: String = self.check_token(token)?;
+        if !token_user_uuid.eq(&user_uuid.to_string()) {
+            return Err(DatabaseError::new(DatabaseErrorKind::AuthenticationError));
         }
         DbConnection::check_query_processed(
             diesel::delete(
@@ -272,18 +342,18 @@ impl DbConnection {
         )
     }
     /// Helper function for ensuring that a record is updated
-    fn check_query_processed(query: QueryResult<usize>) -> QueryResult<()> {
+    fn check_query_processed(query: QueryResult<usize>) -> Result<(), DatabaseError> {
         if let Ok(rows) = query {
             return if rows > 0 {
                 Ok(())
             } else {
-                Err(Error::NotFound)
+                Err(DatabaseError::new(DatabaseErrorKind::AlreadyExists))
             };
         }
-        Err(query.err().expect("Failed to unwrap error"))
+        Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
     }
     /// Checks if a given token is valid for the given user
-    ///
+    /// And returns the user_uuid for the owner of the token
     /// #Example
     /// ```
     /// use database_handler::DbConnection;
@@ -295,7 +365,7 @@ impl DbConnection {
     /// let user_uuid: uuid::Uuid = connection.get_user_uuid(&username).unwrap();
     /// let token = connection.login(&username,&password).unwrap().unwrap();
     ///
-    /// let result = connection.check_token(token,user_uuid);    
+    /// let user_uuid = connection.check_token(token);    
     /// ```
     /// #Returns
     /// Ok(True) - The token is valid
@@ -304,27 +374,30 @@ impl DbConnection {
     ///
     /// #Error
     /// Err - The token doesn't exist/unexpected error
-    pub fn check_token(&mut self, token_id: String, client_id: Uuid) -> QueryResult<bool> {
-        let token: Token = schema::tokens::table
+    pub fn check_token(&mut self, token_id: String) -> Result<String, DatabaseError> {
+        let token: Token = if let Ok(_token) = schema::tokens::table
             .filter(schema::tokens::token.eq(token_id))
-            .first(&self.connection)?;
+            .first(&self.connection)
+        {
+            _token
+        } else {
+            return Err(DatabaseError::new(DatabaseErrorKind::NotFound));
+        };
+
         if chrono::Utc::now().naive_utc().ge(&token.expiry_date) {
-            return Ok(false);
+            return Err(DatabaseError::new(DatabaseErrorKind::AuthenticationError));
         }
         if token.start_date.ge(&token.expiry_date) {
             //TODO This should never happen, is it worth checking?
             warn!("This should never happen, is it worth checking?");
-            return Ok(false);
+            return Err(DatabaseError::new(DatabaseErrorKind::AuthenticationError));
         }
         if (token.start_date + chrono::Duration::weeks(52)).ge(&token.expiry_date) {
             //TODO Limits token duration to one year. May not be necessary?
             warn!("Limits token duration to one year. May not be necessary?");
-            return Ok(false);
+            return Err(DatabaseError::new(DatabaseErrorKind::AuthenticationError));
         }
-        if !client_id.eq(&token.client_uuid) {
-            return Ok(false);
-        }
-        return Ok(true);
+        Ok(token.client_uuid.to_string())
     }
     /// Creates a new token
     ///
@@ -369,10 +442,11 @@ impl DbConnection {
         token: String,
         user_uuid: Uuid,
         password: String,
-    ) -> QueryResult<bool> {
+    ) -> Result<bool, DatabaseError> {
         //Checks for authentication
-        if !self.check_token(token, user_uuid)? {
-            return Err(diesel::NotFound);
+        let token_user_uuid: String = self.check_token(token)?;
+        if !token_user_uuid.eq(&user_uuid.to_string()) {
+            return Err(DatabaseError::new(DatabaseErrorKind::AuthenticationError));
         }
 
         let hash = DbConnection::hash_password(password);
@@ -381,18 +455,18 @@ impl DbConnection {
         )
         .set(schema::user_details::password.eq(hash))
         .execute(&self.connection);
-        return if let Ok(size) = result {
+        if let Ok(size) = result {
             if size == 1 {
                 Ok(true)
             } else if size > 1 {
                 //TODO Remove panic
                 panic!("Updated more than one password!");
             } else {
-                Err(diesel::NotFound)
+                Err(DatabaseError::new(DatabaseErrorKind::NotFound))
             }
         } else {
-            Err(result.err().unwrap())
-        };
+            Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
+        }
     }
 
     /// Checks the username and password are correct, and returns a token valid for 30 minutes
@@ -542,9 +616,8 @@ mod user_accounts_test {
         let token_res = con.login(&username, &password);
         assert!(token_res.is_ok());
         let token = token_res.unwrap();
-        let check_token = con.check_token(token, user.user_uuid);
+        let check_token = con.check_token(token);
         assert!(check_token.is_ok());
-        assert!(check_token.unwrap());
     }
 
     #[test]

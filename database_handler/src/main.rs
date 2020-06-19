@@ -18,7 +18,7 @@ fn create_account() {
     let mut con = DbConnection::new_connection();
     con.new_user_account(&user).unwrap();
     con.get_user_account(user_id).unwrap();
-    con.archive_user_account(user_id).unwrap();
+    //con.archive_user_account(user_id).unwrap();
 }
 
 fn main() {
