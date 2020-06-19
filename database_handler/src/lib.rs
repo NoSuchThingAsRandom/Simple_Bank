@@ -260,6 +260,43 @@ impl DbConnection {
         }
     }
 
+    /// Retrieves bank account details
+    ///
+    /// Gets the bank account matching the given account number,
+    /// AND the given user_uuid owning the account
+    ///
+    /// #Example
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let user_uuid: uuid::Uuid ="some_uuid".parse().unwrap();
+    /// let account_number: i32 = 12345678;
+    ///
+    /// let mut connection = DbConnection::new_connection();
+    ///
+    /// let user = connection.get_bank_account(account_number,user_uuid).unwrap();
+    /// ```
+    /// #Error
+    ///     Err(NotFound) - No account with that number found
+    pub fn get_all_bank_accounts(
+        &mut self,
+        user_uuid: Uuid,
+    ) -> Result<Vec<Account>, DatabaseError> {
+        match schema::bank_accounts::table
+            .filter(schema::bank_accounts::user_uuid.eq(user_uuid))
+            .load::<Account>(&self.connection)
+        {
+            Ok(account) => Ok(account),
+            Err(e) => {
+                if e == diesel::result::Error::NotFound {
+                    Err(DatabaseError::new(DatabaseErrorKind::NotFound))
+                } else {
+                    Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
+                }
+            }
+        }
+    }
+
     /// Sets the archive flag on a user account, so that it can no longer be modified
     ///
     /// Only the user that owns the account can modify the archive flag

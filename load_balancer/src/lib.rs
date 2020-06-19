@@ -29,20 +29,6 @@ impl RequestError {
         RequestError { error_kind }
     }
 
-    fn from_database_error(error: DatabaseError) -> RequestError {
-        match error.error_kind {
-            database_handler::DatabaseErrorKind::AlreadyExists => {
-                RequestError::new(ErrorKind::InvalidArguments)
-            }
-
-            DatabaseErrorKind::AuthenticationError => {
-                RequestError::new(ErrorKind::NotAuthenticated)
-            }
-            DatabaseErrorKind::DatabaseFailure => RequestError::new(ErrorKind::DatabaseFailure),
-            DatabaseErrorKind::Unknown => RequestError::new(ErrorKind::DatabaseFailure),
-            DatabaseErrorKind::NotFound => RequestError::new(ErrorKind::InvalidArguments),
-        }
-    }
     fn process(&mut self, instance: &mut Instance, client_id: String) -> bool {
         match self.error_kind {
             ErrorKind::NotAuthenticated => {
@@ -71,6 +57,23 @@ impl RequestError {
             }
         };
         true
+    }
+}
+
+impl From<database_handler::DatabaseError> for RequestError {
+    fn from(error: DatabaseError) -> Self {
+        match error.error_kind {
+            database_handler::DatabaseErrorKind::AlreadyExists => {
+                RequestError::new(ErrorKind::InvalidArguments)
+            }
+
+            DatabaseErrorKind::AuthenticationError => {
+                RequestError::new(ErrorKind::NotAuthenticated)
+            }
+            DatabaseErrorKind::DatabaseFailure => RequestError::new(ErrorKind::DatabaseFailure),
+            DatabaseErrorKind::Unknown => RequestError::new(ErrorKind::DatabaseFailure),
+            DatabaseErrorKind::NotFound => RequestError::new(ErrorKind::InvalidArguments),
+        }
     }
 }
 
@@ -198,12 +201,16 @@ impl Instance {
             Request_RequestType::AUTHENTICATE => {}
             Request_RequestType::TRANSACTIONS => {}
             Request_RequestType::ACCOUNT => match msg.detailed_type {
-                Some(Request_oneof_detailed_type::account(Request_AccountType::LIST_ACCOUNTS)) => {}
+                Some(Request_oneof_detailed_type::account(Request_AccountType::LIST_ACCOUNTS)) => {
+                    return self.get_all_accounts(&msg);
+                }
                 Some(Request_oneof_detailed_type::account(Request_AccountType::ACCOUNT_INFO)) => {
                     return self.get_account_info(&msg);
                 }
 
-                Some(Request_oneof_detailed_type::account(Request_AccountType::NEW_ACCOUNT)) => {}
+                Some(Request_oneof_detailed_type::account(Request_AccountType::NEW_ACCOUNT)) => {
+                    return self.new_account(msg);
+                }
 
                 Some(_) | None => {}
             },
@@ -280,11 +287,8 @@ impl Instance {
         user.user_uuid = database_handler::new_secure_uuid_v4();
         user.join_date = chrono::Utc::today().naive_utc();
         user.archived = false;
-        if let Err(e) = self.database_connection.new_user_account(&user) {
-            Err(RequestError::from_database_error(e))
-        } else {
-            Ok(())
-        }
+        self.database_connection.new_user_account(&user)?;
+        Ok(())
     }
 
     fn login(&mut self, msg: &Request) -> Result<(), RequestError> {
@@ -337,17 +341,14 @@ impl Instance {
         };
     }
     fn get_account_info(&mut self, msg: &Request) -> Result<(), RequestError> {
-        let account = match self.database_connection.get_bank_account(
+        let account = self.database_connection.get_bank_account(
             msg.data[0]
                 .parse()
                 .map_err(|_e| RequestError::new(ErrorKind::InvalidArguments))?,
             msg.user_id
                 .parse()
                 .map_err(|_e| RequestError::new(ErrorKind::InvalidArguments))?,
-        ) {
-            Ok(account) => account,
-            Err(e) => return Err(RequestError::from_database_error(e)),
-        };
+        )?;
         let mut data: Vec<String> = Vec::new();
         data.push(
             serde_json::to_string(&account)
@@ -362,6 +363,24 @@ impl Instance {
             .map_err(|_e| RequestError::new(ErrorKind::NetworkFailure))
     }
 
+    fn get_all_accounts(&mut self, msg: &Request) -> Result<(), RequestError> {
+        let user_uuid = msg
+            .user_id
+            .parse()
+            .map_err(|e| RequestError::new(ErrorKind::InvalidArguments))?;
+        let accounts = self.database_connection.get_all_bank_accounts(user_uuid)?;
+        let account_str = serde_json::to_string(&accounts).unwrap();
+        let mut data = Vec::new();
+        data.push(account_str);
+        self.network_server
+            .send_message(Request::success_result(
+                data,
+                msg.client_id.clone(),
+                Request_ResultType::SUCCESS,
+            ))
+            .map_err(|e| RequestError::new(ErrorKind::NetworkFailure))?;
+        Ok(())
+    }
     fn new_account(&mut self, msg: &Request) -> Result<(), RequestError> {
         let account_str = msg
             .data
@@ -372,6 +391,7 @@ impl Instance {
             .user_id
             .parse()
             .map_err(|_e| RequestError::new(ErrorKind::NotAuthenticated))?;
+        self.database_connection.new_bank_account(&account)?;
         Ok(())
     }
 }
