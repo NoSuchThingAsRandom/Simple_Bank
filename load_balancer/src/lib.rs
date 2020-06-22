@@ -1,5 +1,6 @@
 extern crate database_handler;
 extern crate network_listener;
+extern crate structs;
 
 use std::fmt;
 use std::fmt::Formatter;
@@ -8,16 +9,15 @@ use log::error;
 use log::info;
 use log::trace;
 use log::warn;
-
-use database_handler::models::{Account, User};
-use database_handler::{DatabaseError, DatabaseErrorKind};
-use network_listener::protos::message::{
-    Request, Request_AccountType, Request_AuthenticateType, Request_MiscType, Request_ResultType,
-    Request_TransactionType, Request_oneof_detailed_type,
+use structs::models::{Account, User};
+use structs::protos::message::{
+    Request, Request_AccountType, Request_AuthenticateType, Request_MiscType, Request_RequestType,
+    Request_ResultType, Request_TransactionType, Request_oneof_detailed_type,
 };
+
+use database_handler::{DatabaseError, DatabaseErrorKind};
 use network_listener::{
-    protos::message::Request_RequestType, Client, ADDRESS, DATA_ACCOUNTS_PORT, DATA_MISC_PORT,
-    DATA_TRANSACTIONS_PORT, LOAD_BALANCER_PORT,
+    Client, ADDRESS, DATA_ACCOUNTS_PORT, DATA_MISC_PORT, DATA_TRANSACTIONS_PORT, LOAD_BALANCER_PORT,
 };
 
 struct RequestError {
@@ -30,6 +30,7 @@ impl RequestError {
     }
 
     fn process(&mut self, instance: &mut Instance, client_id: String) -> bool {
+        trace!("Processing error ({:?})", self);
         match self.error_kind {
             ErrorKind::NotAuthenticated => {
                 if instance.send_authentication_error(client_id).is_err() {
@@ -39,9 +40,11 @@ impl RequestError {
             }
 
             ErrorKind::DatabaseFailure => {
+                instance.send_critical_error(client_id);
                 panic!("The database has crashed!");
             }
             ErrorKind::Shutdown => {
+                instance.send_critical_error(client_id);
                 instance.database_connection.close();
                 return false;
             }
@@ -52,6 +55,7 @@ impl RequestError {
                 }
             }
             ErrorKind::NetworkFailure => {
+                instance.send_critical_error(client_id);
                 error!("The network connection has failed!");
                 return false;
             }
@@ -140,12 +144,14 @@ impl Instance {
         loop {
             //Get incoming client messages
             for mut msg in self.network_server.get_messages() {
+                trace!("Received message {:?}", msg);
                 //Check if user wishes to login
                 if msg.field_type == Request_RequestType::AUTHENTICATE {
                     match msg.detailed_type {
                         Some(Request_oneof_detailed_type::auth(
                             Request_AuthenticateType::LOGIN,
                         )) => {
+                            trace!("User is logging in..");
                             if let Err(mut e) = self.login(&msg) {
                                 trace!(
                                     "Failed to login client ({}) with error ({})",
@@ -161,6 +167,7 @@ impl Instance {
                         Some(Request_oneof_detailed_type::auth(
                             Request_AuthenticateType::NEW_USER,
                         )) => {
+                            trace!("User is creating new account");
                             if let Err(mut e) = self.create_user(&msg) {
                                 trace!(
                                     "Failed to login client ({}) with error ({})",
@@ -177,7 +184,11 @@ impl Instance {
                     }
                 }
                 if let Err(e) = self.token_is_valid(&mut msg) {
-                    trace!("Failed to verify auth {}", e);
+                    trace!(
+                        "Failed to verify auth for '{}' error ({})",
+                        msg.client_id,
+                        e
+                    );
                     if let Err(mut e) = self.send_login_request(&msg) {
                         if e.process(self, msg.client_id) {
                             return;
@@ -196,6 +207,7 @@ impl Instance {
 
     /// This executes the given request
     fn parse_request(&mut self, msg: &Request) -> Result<(), RequestError> {
+        trace!("Processing request");
         match msg.field_type {
             Request_RequestType::SHUTDOWN => {}
             Request_RequestType::AUTHENTICATE => {}
@@ -278,6 +290,7 @@ impl Instance {
     }
 
     fn create_user(&mut self, msg: &Request) -> Result<(), RequestError> {
+        info!("Creating user");
         let user_string = msg
             .data
             .get(0)
@@ -287,11 +300,22 @@ impl Instance {
         user.user_uuid = database_handler::new_secure_uuid_v4();
         user.join_date = chrono::Utc::today().naive_utc();
         user.archived = false;
+        user.password = database_handler::DbConnection::hash_password(user.password);
         self.database_connection.new_user_account(&user)?;
+        let success_request = Request::success_result(
+            Vec::new(),
+            String::from(&msg.client_id),
+            Request_ResultType::SUCCESS,
+        );
+        self.network_server
+            .send_message(success_request)
+            .map_err(|e| RequestError::new(ErrorKind::NetworkFailure))?;
+        info!("Succesfully created user");
         Ok(())
     }
 
     fn login(&mut self, msg: &Request) -> Result<(), RequestError> {
+        trace!("Logging in...");
         let token_req = self.database_connection.login(
             &String::from(
                 msg.data
@@ -300,25 +324,32 @@ impl Instance {
             ),
             &String::from(
                 msg.data
-                    .get(0)
+                    .get(1)
                     .ok_or(RequestError::new(ErrorKind::InvalidArguments))?,
             ),
         );
 
         let result: Request = match token_req {
             Ok(token) => {
+                info!("Succesfully logged in");
                 let mut data = Vec::new();
                 data.push(token);
                 Request::success_result(data, msg.client_id.clone(), Request_ResultType::SUCCESS)
             }
 
-            Err(_) => Request::success_result(
-                Vec::new(),
-                msg.client_id.clone(),
-                Request_ResultType::UNEXPECTED_ERROR,
-            ),
+            Err(_) => {
+                info!("Invalid parameters for logging in");
+                Request::success_result(
+                    Vec::new(),
+                    msg.client_id.clone(),
+                    Request_ResultType::INVALID_ARGS,
+                )
+            }
         };
-        self.network_server.send_message(result);
+        self.network_server
+            .send_message(result)
+            .map_err(|e| RequestError::new(ErrorKind::NetworkFailure))?;
+
         Ok(())
     }
 
@@ -386,7 +417,7 @@ impl Instance {
             .data
             .get(0)
             .ok_or(RequestError::new(ErrorKind::InvalidArguments))?;
-        let mut account: Account = serde_json::from_str(account_str).unwrap();
+        let mut account: Account = Account::simple_account();
         account.user_uuid = msg
             .user_id
             .parse()

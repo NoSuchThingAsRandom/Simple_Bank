@@ -1,10 +1,10 @@
+extern crate structs;
 mod client_handler;
 mod crypto;
 mod network_worker;
-pub mod protos;
 mod server_connection;
 
-use crate::protos::message::{
+use structs::protos::message::{
     Request, Request_RequestType, Request_ResultType, Request_oneof_detailed_type,
 };
 
@@ -24,74 +24,6 @@ pub const LOAD_BALANCER_PORT: &str = "50000";
 const MAX_CLIENTS_THREAD: u8 = 20;
 const _MAX_MESSAGE_BYTES: u16 = 65535;
 
-/**
-    Client uuid - An identifier for the socket connection
-    User uuid   - An identifier for a authenticated user
-
-**/
-impl Request {
-    pub fn new_from_fields(
-        data: Vec<String>,
-        client: Uuid,
-        from_client: bool,
-    ) -> Result<Request, std::io::Error> {
-        let message = Request {
-            field_type: Default::default(),
-            user_id: Default::default(),
-            client_id: client.to_string(),
-            data: protobuf::RepeatedField::from_vec(data),
-            from_client,
-            detailed_type: Default::default(),
-            token_id: "".to_string(),
-            unknown_fields: protobuf::UnknownFields::new(),
-            cached_size: Default::default(),
-        };
-        Ok(message)
-    }
-    pub fn success_result(
-        data: Vec<String>,
-        client: String,
-        result_type: Request_ResultType,
-    ) -> Request {
-        let message = Request {
-            field_type: Request_RequestType::Result,
-            user_id: Default::default(),
-            client_id: client,
-            data: protobuf::RepeatedField::from_vec(data),
-            from_client: false,
-            detailed_type: Some(Request_oneof_detailed_type::result(result_type)),
-            token_id: "".to_string(),
-            unknown_fields: protobuf::UnknownFields::new(),
-            cached_size: Default::default(),
-        };
-        message
-    }
-    pub fn shutdown() -> Request {
-        Request {
-            field_type: Request_RequestType::SHUTDOWN,
-            user_id: "".to_string(),
-            client_id: "".to_string(),
-            data: Default::default(),
-            from_client: false,
-            detailed_type: None,
-            token_id: "".to_string(),
-            unknown_fields: Default::default(),
-            cached_size: Default::default(),
-        }
-    }
-    pub fn new_secure_uuid_v4() -> Uuid {
-        let mut rng = rand::rngs::StdRng::from_entropy();
-        let mut bytes = [0; 16];
-
-        rng.fill_bytes(&mut bytes);
-
-        Builder::from_bytes(bytes)
-            .set_variant(Variant::RFC4122)
-            .set_version(Version::Random)
-            .build()
-    }
-}
-
 pub struct Client {
     pub addr: String,
     pub messages: Vec<Request>,
@@ -105,11 +37,9 @@ impl Client {
         let (outgoing_messages_out, outgoing_messages_in) = channel();
         let server_address = addr.clone();
         thread::spawn(move || {
-            //TODO Need to renable client network thread
-            error!("Need to renable network thread!");
-
-            //let mut conn = server_connection::ServerConn::new(addr.clone());
-            //conn.start(incoming_messages_out, outgoing_messages_in).unwrap();
+            let mut conn = server_connection::ServerConn::new(addr.clone());
+            conn.start(incoming_messages_out, outgoing_messages_in)
+                .unwrap();
         });
         Client {
             addr: server_address,
@@ -118,12 +48,15 @@ impl Client {
             messages_out: outgoing_messages_out,
         }
     }
-    pub fn get_messages(&mut self) -> Vec<Request> {
+    pub fn get_all_messages(&mut self) -> Vec<Request> {
         self.messages_in.try_iter().collect()
     }
 
-    pub fn get_message_blocking(&mut self) -> Vec<Request> {
+    pub fn get_all_message_blocking(&mut self) -> Vec<Request> {
         self.messages_in.iter().collect()
+    }
+    pub fn get_singular_message(&mut self) -> Request {
+        self.messages_in.recv().unwrap()
     }
     pub fn send_message(&mut self, message: Request) -> Result<(), SendError<Request>> {
         self.messages_out.send(message)

@@ -7,9 +7,9 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
-use crate::protos::message::{Request, Request_RequestType};
 use log::{error, info, trace};
 use mio::{Events, Interest, Poll, Token};
+use structs::protos::message::{Request, Request_RequestType};
 use uuid::Uuid;
 
 /// Struct representing a mio poll for incoming connections

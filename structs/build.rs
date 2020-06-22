@@ -1,4 +1,5 @@
 extern crate protobuf_codegen_pure;
+
 fn main() {
     println!("Hello");
 

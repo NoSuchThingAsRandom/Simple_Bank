@@ -1,5 +1,5 @@
 use crate::crypto::TlsConnection;
-use crate::protos::message::{Request, Request_RequestType};
+use structs::protos::message::{Request, Request_RequestType};
 
 use std::collections::HashMap;
 use std::sync::mpsc::*;
@@ -74,7 +74,7 @@ impl Client {
             );
             if buffer.len() >= data_size as usize {
                 let (msg_bytes, remaining_bytes) = buffer.split_at(data_size as usize).clone();
-                let msg: Request = protobuf::parse_from_bytes(msg_bytes).unwrap();
+                let msg: Request = protobuf::parse_length_delimited_from_bytes(msg_bytes).unwrap();
                 trace!("Received {:?}", msg);
                 messages.push(msg);
                 self.client_buffer = remaining_bytes.to_vec();
@@ -163,13 +163,11 @@ impl ClientIo {
                     let socket = self.clients.get_mut(&event.token()).unwrap();
                     match socket.read_data() {
                         Ok(messages) => {
-                            for msg in messages {
-                                match self.messages_in.send(msg) {
-                                    Ok(_) => {}
-                                    Err(e) => {
-                                        error!("Send message to user thread failed {}", e);
-                                        shutdown = true;
-                                    }
+                            for mut msg in messages {
+                                msg.client_id = socket.uuid.to_string();
+                                if let Err(e) = self.messages_in.send(msg) {
+                                    error!("Send message to user thread failed {}", e);
+                                    shutdown = true;
                                 }
                             }
                         }

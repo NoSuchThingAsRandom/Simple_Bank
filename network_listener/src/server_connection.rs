@@ -5,10 +5,10 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::protos::message::{Request, Request_RequestType};
 use log::{error, info, trace, warn};
 use mio::{Events, Interest, Poll, Token};
 use rustls::ClientConfig;
+use structs::protos::message::{Request, Request_RequestType};
 use uuid::Uuid;
 
 const BUFFER_SIZE: usize = 512;
@@ -184,7 +184,7 @@ impl ServerConn {
             );
             if buffer.len() >= data_size as usize {
                 let (msg_bytes, remaining_bytes) = buffer.split_at(data_size as usize).clone();
-                let msg: Request = protobuf::parse_from_bytes(msg_bytes).unwrap();
+                let msg: Request = protobuf::parse_length_delimited_from_bytes(msg_bytes).unwrap();
                 trace!("Received {:?}", msg);
                 messages.push(msg);
                 self.client_buffer = remaining_bytes.to_vec();

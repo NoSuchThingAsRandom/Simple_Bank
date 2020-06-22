@@ -4,10 +4,10 @@ use std::net::Shutdown;
 use std::sync::Arc;
 
 use crate::client_handler::Client;
-use crate::protos::message::Request;
 use log::{error, info, trace, warn};
 use protobuf::Message;
 use rustls::{NoClientAuth, ServerConfig};
+use structs::protos::message::Request;
 
 pub struct TlsServer {
     listener: mio::net::TcpListener,
@@ -105,6 +105,7 @@ impl TlsConnection {
     pub fn write_message(&mut self, msg: &Request) -> Result<(), Box<dyn std::error::Error>> {
         //let mut buffer = None;
         let buffer = msg.write_length_delimited_to_bytes().unwrap();
+        trace!("Message size: {}", buffer.len());
         let size = buffer.len() as u16;
         let size_bytes = size.to_be_bytes();
 
@@ -118,7 +119,7 @@ impl TlsConnection {
             written_bytes += self.tls_session.write_tls(&mut self.socket)?;
         }
         info!(
-            "Sent message {:?} to {}, with {} out of {} bytes sent",
+            "Sent message ('{:?}') to {}, with {} out of {} bytes sent",
             msg,
             self.socket.peer_addr()?,
             written_bytes,

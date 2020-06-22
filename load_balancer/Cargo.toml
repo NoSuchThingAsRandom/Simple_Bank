@@ -12,5 +12,6 @@ simplelog = "0.8.0"
 chrono="0.4"
 rand = "0.7.3"
 serde_json ="1.0"
+structs={path="../structs"}
 network_listener={path="../network_listener"}
 database_handler={path="../database_handler"}

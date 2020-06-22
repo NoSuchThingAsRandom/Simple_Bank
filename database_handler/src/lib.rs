@@ -5,16 +5,14 @@ extern crate base64;
 extern crate dotenv;
 extern crate rand;
 extern crate rand_chacha;
-
-pub mod models;
-pub mod schema;
-
-use crate::models::{Account, Token, User};
+extern crate structs;
 
 use dotenv::dotenv;
 use std::{env, fmt};
+use structs::models::{Account, Token, User};
+use structs::schema;
 
-use log::warn;
+use log::{error, info, trace, warn};
 use rand::{RngCore, SeedableRng};
 
 use chrono::Duration;
@@ -132,6 +130,7 @@ impl DbConnection {
     ///     Error(diesel::result::Error::NotFound) - Failed due to collisions
     ///     Error(E) - Failed
     pub fn new_user_account(&mut self, details: &User) -> Result<(), DatabaseError> {
+        trace!("Inserting new user account");
         DbConnection::check_query_processed(
             diesel::insert_into(schema::user_details::table)
                 .values(details)
@@ -142,6 +141,8 @@ impl DbConnection {
     ///
     /// #Example
     /// ```
+    /// extern crate structs;
+    /// use structs::models::Account;
     /// use database_handler::models::Account;
     /// use database_handler::{new_secure_uuid_v4, DbConnection};
     ///
@@ -380,14 +381,34 @@ impl DbConnection {
     }
     /// Helper function for ensuring that a record is updated
     fn check_query_processed(query: QueryResult<usize>) -> Result<(), DatabaseError> {
-        if let Ok(rows) = query {
-            return if rows > 0 {
-                Ok(())
-            } else {
-                Err(DatabaseError::new(DatabaseErrorKind::AlreadyExists))
-            };
+        match query {
+            Ok(rows) => {
+                if rows > 0 {
+                    trace!("Successfully updated {} row", rows);
+                    Ok(())
+                } else {
+                    warn!("No records altered!");
+                    Err(DatabaseError::new(DatabaseErrorKind::AlreadyExists))
+                }
+            }
+            Err(e) => {
+                if let diesel::result::Error::DatabaseError(error_kind, _) = e {
+                    match error_kind {
+                        UniqueViolation => {
+                            warn!("Record already exists!");
+                            Err(DatabaseError::new(DatabaseErrorKind::AlreadyExists))
+                        }
+                        _ => {
+                            error!("Database failure? {:?}", e);
+                            Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
+                        }
+                    }
+                } else {
+                    error!("Database failure? {:?}", e);
+                    Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
+                }
+            }
         }
-        Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
     }
     /// Checks if a given token is valid for the given user
     /// And returns the user_uuid for the owner of the token
@@ -545,7 +566,8 @@ impl DbConnection {
                 start_date: current_time,
                 expiry_date: end_time,
             };
-            let rows = diesel::insert_into(schema::tokens::table)
+            trace!("Valid username,password creating token");
+            let rows = diesel::insert_into(structs::schema::tokens::table)
                 .values(insert_token)
                 .execute(&self.connection);
             if rows == Ok(1) {
@@ -597,9 +619,9 @@ pub fn new_secure_uuid_v4() -> Uuid {
 
 #[cfg(test)]
 mod user_accounts_test {
-    use crate::models::User;
     use crate::{new_secure_uuid_v4, DbConnection};
     use chrono::Utc;
+    use structs::models::User;
 
     const USER_UUID_1: &str = "e78836e9-1982-4380-a678-a5b4db33d205";
     const USER_UUID_2: &str = "abe8e4bb-c87a-48ff-a4fb-2ebd42745aae";

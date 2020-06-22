@@ -1,6 +1,3 @@
-extern crate chrono;
-
-extern crate uuid;
 use super::schema::{bank_accounts, tokens, user_details};
 use serde::{Deserialize, Serialize};
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
@@ -43,7 +40,7 @@ pub struct Account {
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
 #[table_name = "tokens"]
 pub struct Token {
-    pub(crate) token: String,
+    pub token: String,
     pub client_uuid: uuid::Uuid,
     pub start_date: chrono::NaiveDateTime,
     pub expiry_date: chrono::NaiveDateTime,

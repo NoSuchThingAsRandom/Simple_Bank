@@ -5,8 +5,6 @@ authors = ["Sam <a>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[build-dependencies]
-protobuf-codegen-pure = "2.14.0"
 
 
 [dependencies]
@@ -18,3 +16,4 @@ rustls = "0.17.0"
 mio = {version="0.7.0",features=["os-poll","tcp"]}
 webpki = "0.21.3"
 protobuf = "2.14.0"
+structs={path="../structs"}

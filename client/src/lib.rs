@@ -1,17 +1,23 @@
+extern crate chrono;
+extern crate network_listener;
+extern crate protobuf;
+extern crate serde_json;
+extern crate structs;
 extern crate strum;
 extern crate strum_macros;
 
-use std::fmt::Formatter;
-use std::io::Cursor;
-use std::path::Path;
+use std::convert::TryFrom;
+use std::fmt;
 use std::str::FromStr;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
-use std::time::Duration;
-use std::{fmt, io, thread};
 
 use log::{error, info, trace, warn};
-use rustls::ClientConfig;
+use protobuf::RepeatedField;
+use structs::models::{Account, User};
+use structs::protos::message::{
+    Request, Request_AccountType, Request_AuthenticateType, Request_RequestType,
+    Request_ResultType, Request_oneof_detailed_type,
+};
 use strum::EnumMessage;
 use strum::IntoEnumIterator;
 use strum_macros::AsRefStr;
@@ -20,58 +26,26 @@ use strum_macros::EnumMessage;
 use strum_macros::EnumString;
 use text_io::read;
 
-use crate::network::{ServerConn, MAX_MESSAGE_BYTES};
-
-pub mod network;
-
-impl Message {
-    pub fn new(data: String) -> Result<Message, std::io::Error> {
-        if data.as_bytes().len() > MAX_MESSAGE_BYTES as usize {
-            unimplemented!(
-                "message data is too big!\nmessage bytes {}",
-                data.as_bytes().len()
-            )
-        }
-        let message = Message {
-            data,
-            sender: String::new(),
-            recipient: String::new(),
-            options: MessageOptions::None,
-        };
-        Ok(message)
-    }
-    pub fn shutdown() -> Message {
-        Message {
-            data: "".to_string(),
-            sender: "".to_string(),
-            recipient: "".to_string(),
-            options: MessageOptions::Shutdown,
-        }
-    }
-}
-
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "message from: {}    To: {}    Contents: {}",
-            self.sender, self.recipient, self.data
-        )
-    }
-}
+use network_listener::Client;
 
 #[derive(EnumIter, EnumString, EnumMessage, Debug, AsRefStr)]
 enum Commands {
     #[strum(
-        message = "Update",
-        detailed_message = "This retrieves any new messages and connections"
+        message = "List_Accounts",
+        detailed_message = "This list all your bank accounts"
     )]
-    Update,
+    List_Accounts,
+    #[strum(
+        message = "Create_Account",
+        detailed_message = "This will create a account"
+    )]
+    Create_Account,
 
-    #[strum(message = "message", detailed_message = "This sends a message")]
-    Message,
-
-    Test,
+    #[strum(
+        message = "Account_Info",
+        detailed_message = "This provides detailed information about an account"
+    )]
+    Account_Info,
 
     #[strum(message = "Exit", detailed_message = "This exits the program")]
     Exit,
@@ -108,39 +82,17 @@ impl Commands {
     }
 }
 
-struct ClientUser {
-    addr: String,
-    messages: Vec<Message>,
-    nickname: String,
-}
-
-impl fmt::Display for ClientUser {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Client with address {}, and nickname {}",
-            self.addr, self.nickname
-        )
-    }
-}
-
 pub struct InputLoop {
-    messages_in_receiver: Receiver<Message>,
-    messages_out_sender: Sender<Message>,
-    archive_message: Vec<Message>,
+    server_connection: network_listener::Client,
+    token: String,
+    archive_message: Vec<Request>,
 }
 
 impl InputLoop {
     pub fn new(address: String) -> InputLoop {
-        let (messages_in_sender, messages_in_receiver) = channel();
-        let (messages_out_sender, messages_out_receiver) = channel();
-        thread::spawn(move || {
-            let mut network = network::ServerConn::new(address);
-            network.start(messages_in_sender, messages_out_receiver);
-        });
         InputLoop {
-            messages_in_receiver,
-            messages_out_sender,
+            token: String::from(""),
+            server_connection: Client::start(address),
             archive_message: Vec::new(),
         }
     }
@@ -148,58 +100,212 @@ impl InputLoop {
     /// Responds to user input
     pub fn start(&mut self) {
         info!("Started user input loop");
+        println!("Would you like to login (login) or create an account (create)? ");
+        let choice: String = read!("{}\n");
+        if choice == String::from("login") {
+            self.login();
+        } else {
+            self.new_account();
+        }
         loop {
             match Commands::get_user_command() {
-                Commands::Message => {
+                Commands::List_Accounts => {
                     println!("Enter the message to send: ");
                     let msg: String = read!("{}\n");
-
-                    if self.send_message(msg) {
-                        println!("Sent message");
-                    } else {
-                        println!("Failed to send message");
-                    }
                 }
-                Commands::Update => {
-                    self.check_messages();
+                Commands::Account_Info => {
+                    self.account_info();
                 }
                 Commands::Exit => {
                     println!("Goodbye!");
                     return;
                 }
-                Commands::Test => println!("Should execute some tests..."),
+                Commands::Create_Account => {
+                    self.new_bank_account();
+                }
             }
         }
     }
-    fn check_messages(&mut self) {
-        info!("Updating messages");
-        for msg in self.messages_in_receiver.try_iter() {
-            println!("{}", msg);
-            self.archive_message.push(msg);
+    fn process_message(&mut self, msg: &Request) {
+        match &msg.field_type {
+            Request_RequestType::AUTHENTICATE => {
+                println!("You are not logged in");
+                self.login()
+            }
+            Request_RequestType::ACCOUNT => {
+                if let Some(detail) = &msg.detailed_type {
+                    match detail {
+                        Request_oneof_detailed_type::auth(_) => {}
+                        Request_oneof_detailed_type::transaction(_) => {}
+                        Request_oneof_detailed_type::account(_) => {}
+                        Request_oneof_detailed_type::misc(_) => {}
+                        Request_oneof_detailed_type::result(_) => {}
+                    }
+                }
+            }
+            Request_RequestType::SHUTDOWN => {}
+            Request_RequestType::TRANSACTIONS => {}
+            Request_RequestType::MISC => {}
+            Request_RequestType::Result => {}
+        }
+    }
+    fn login(&mut self) {
+        println!("Enter your username: ");
+        let username: String = read!("{}\n");
+        println!("Enter your password: ");
+        let password: String = read!("{}\n");
+        let data = vec![username, password];
+        let msg = Request {
+            field_type: Request_RequestType::AUTHENTICATE,
+            user_id: "".to_string(),
+            client_id: "".to_string(),
+            data: RepeatedField::from_vec(data),
+            from_client: true,
+            token_id: "".to_string(),
+            detailed_type: Some(Request_oneof_detailed_type::auth(
+                Request_AuthenticateType::LOGIN,
+            )),
+            unknown_fields: Default::default(),
+            cached_size: Default::default(),
+        };
+        self.server_connection.send_message(msg).unwrap();
+        if let Some(data) = InputLoop::process_result(self.server_connection.get_singular_message())
+        {
+            self.token = String::from(data.get(0).unwrap());
+            println!("Successfully logged in");
+        } else {
+            println!("Failed to login!");
+            self.login();
         }
     }
 
-    fn send_message(&mut self, msg_data: String) -> bool {
-        return match Message::new(msg_data) {
-            Ok(msg) => {
-                info!("Attempting to send message {}", msg);
-                if let Err(e) = self.messages_out_sender.send(msg) {
-                    error!("Failed to send message to networking thread ({})", e);
-                    false
-                } else {
-                    true
-                }
-            }
-            Err(_) => {
-                println!("message is too big!");
-                false
+    fn new_account(&mut self) {
+        println!("Enter your username: ");
+        let username: String = read!("{}\n");
+
+        println!("Enter your password: ");
+        let password: String = read!("{}\n");
+
+        println!("Enter your email: ");
+        let email: String = read!("{}\n");
+
+        println!("Enter your date of birth in the format 'DD MM YYYY: ");
+        let dob_str: String = read!("{}\n");
+        let dob = match chrono::NaiveDate::parse_from_str(&dob_str, "%d %m %Y") {
+            Ok(dob) => dob,
+            Err(E) => {
+                println!("Invalid date format\nExiting user creation");
+                return;
             }
         };
+        let user: User = User {
+            user_uuid: Default::default(),
+            username,
+            password,
+            email,
+            date_of_birth: dob,
+            join_date: chrono::Utc::today().naive_utc(),
+            archived: false,
+        };
+        let user_string = match serde_json::to_string(&user) {
+            Ok(user_str) => user_str,
+            Err(E) => {
+                println!("Failed to process given data\nExiting user creation");
+                return;
+            }
+        };
+        let msg = Request {
+            field_type: Request_RequestType::AUTHENTICATE,
+            user_id: "".to_string(),
+            client_id: "".to_string(),
+            data: RepeatedField::from_vec(vec![user_string]),
+            from_client: true,
+            token_id: "".to_string(),
+            detailed_type: Some(Request_oneof_detailed_type::auth(
+                Request_AuthenticateType::NEW_USER,
+            )),
+            unknown_fields: Default::default(),
+            cached_size: Default::default(),
+        };
+        self.server_connection.send_message(msg).unwrap();
+        let response = self.server_connection.get_singular_message();
+        if let Some(_) = InputLoop::process_result(response) {
+            println!("Successfully created account");
+            println!("Now logging in...");
+            self.login();
+        } else {
+            println!("Failed to create account");
+        }
+    }
+    fn new_bank_account(&mut self) {
+        let data = Vec::new();
+        let request = Request::new_from_fields(
+            data,
+            Default::default(),
+            true,
+            Request_RequestType::ACCOUNT,
+            Some(Request_oneof_detailed_type::account(
+                Request_AccountType::NEW_ACCOUNT,
+            )),
+        )
+        .unwrap();
+        self.server_connection.send_message(request).unwrap();
+        let response = self.server_connection.get_singular_message();
+        if let Some(_) = InputLoop::process_result(response) {
+            println!("Successfully created bank account");
+        } else {
+            println!("Failed to create bank account");
+        }
+    }
+
+    fn account_info(&mut self) {}
+    fn list_accounts(&mut self) {
+        let data = Vec::new();
+        let request = Request::new_from_fields(
+            data,
+            Default::default(),
+            true,
+            Request_RequestType::ACCOUNT,
+            Some(Request_oneof_detailed_type::account(
+                Request_AccountType::LIST_ACCOUNTS,
+            )),
+        )
+        .unwrap();
+        self.server_connection.send_message(request).unwrap();
+        if let Some(data) = InputLoop::process_result(self.server_connection.get_singular_message())
+        {
+            println!("Accounts: ");
+            println!("Account Number        Balance     ");
+            for account_str in data {
+                let account: Account = serde_json::from_str(&account_str).unwrap();
+                println!("{}", account);
+            }
+        }
+    }
+
+    fn process_result(request: Request) -> Option<Vec<String>> {
+        if let Some(Request_oneof_detailed_type::result(result_type)) = request.detailed_type {
+            match result_type {
+                Request_ResultType::SUCCESS => return Some(Vec::try_from(request.data).unwrap()),
+                Request_ResultType::INVALID_ARGS => {
+                    println!("Invalid details given");
+                }
+                Request_ResultType::UNEXPECTED_ERROR => {
+                    println!("Unexpected error encountered!");
+                }
+                Request_ResultType::NOT_AUTHENTICATED => {
+                    println!("Not authenticated?\nSHIT BROKE");
+                }
+            }
+        } else {
+            println!("Invalid return type given!!!\n SHIT VERY BROKE");
+        }
+        None
     }
 
     pub fn shutdown(&mut self) {
-        self.messages_out_sender
-            .send(Message::shutdown())
-            .expect("Failed to send shutdown command");
+        //self.messages_out_sender
+        //    .send(Message::shutdown())
+        //    .expect("Failed to send shutdown command");
     }
 }

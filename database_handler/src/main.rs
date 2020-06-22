@@ -1,7 +1,7 @@
 use chrono::Utc;
+use structs::models::User;
 
 use database_handler;
-use database_handler::models::User;
 use database_handler::{new_secure_uuid_v4, DbConnection};
 
 fn create_account() {
