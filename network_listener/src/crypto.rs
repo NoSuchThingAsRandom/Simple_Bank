@@ -9,12 +9,14 @@ use protobuf::Message;
 use rustls::{NoClientAuth, ServerConfig};
 use structs::protos::message::Request;
 
+///This is a TLS server struct for listening to incoming client connections
 pub struct TlsServer {
     listener: mio::net::TcpListener,
     config: Arc<ServerConfig>,
 }
 
 impl TlsServer {
+    ///Creates a new server struct, and loads required certificates
     pub fn new(socket: mio::net::TcpListener) -> TlsServer {
         let client_verifier = NoClientAuth::new();
         //TODO Need to provide client cert authentication
@@ -31,6 +33,7 @@ impl TlsServer {
             config: Arc::new(config),
         }
     }
+    ///Will accept incoming connections, and create a TLS connection struct for the client
     pub fn accept_connection(&mut self) -> Client {
         let session = rustls::ServerSession::new(&self.config);
         let (stream, addr) = self.listener.accept().unwrap();
@@ -40,6 +43,7 @@ impl TlsServer {
     }
 }
 
+///Struct for a TLS connection
 pub struct TlsConnection {
     pub socket: mio::net::TcpStream,
     tls_session: Box<dyn rustls::Session>,
@@ -47,6 +51,7 @@ pub struct TlsConnection {
 }
 
 impl TlsConnection {
+    ///Creates a new TLS connection
     pub fn new(
         socket: mio::net::TcpStream,
         tls_session: Box<dyn rustls::Session>,
@@ -57,6 +62,7 @@ impl TlsConnection {
             closing: false,
         }
     }
+    ///Attempts to read encrypted tls data from the tcp buffer into the TLS buffer and decrypt it
     fn read_tls(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let tls_data = self.tls_session.read_tls(&mut self.socket);
         match tls_data {

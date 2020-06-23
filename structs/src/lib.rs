@@ -26,6 +26,7 @@ impl Request {
         client: Uuid,
         from_client: bool,
         request_type: Request_RequestType,
+        token_id: &String,
         detailed_type: Option<Request_oneof_detailed_type>,
     ) -> Result<Request, std::io::Error> {
         let message = Request {
@@ -35,7 +36,7 @@ impl Request {
             data: protobuf::RepeatedField::from_vec(data),
             from_client,
             detailed_type,
-            token_id: "".to_string(),
+            token_id: String::from(token_id),
             unknown_fields: protobuf::UnknownFields::new(),
             cached_size: Default::default(),
         };

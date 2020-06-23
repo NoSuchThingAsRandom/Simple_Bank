@@ -35,8 +35,9 @@ impl RequestError {
             ErrorKind::NotAuthenticated => {
                 if instance.send_authentication_error(client_id).is_err() {
                     error!("The network connection has failed");
-                    return false;
+                    return true;
                 }
+                return false;
             }
 
             ErrorKind::DatabaseFailure => {
@@ -46,21 +47,23 @@ impl RequestError {
             ErrorKind::Shutdown => {
                 instance.send_critical_error(client_id);
                 instance.database_connection.close();
-                return false;
+                return true;
             }
             ErrorKind::InvalidArguments => {
                 if instance.send_incorrect_arguments_error(client_id).is_err() {
                     error!("The network connection has failed");
-                    return false;
+                    return true;
                 }
+                return false;
             }
             ErrorKind::NetworkFailure => {
                 instance.send_critical_error(client_id);
                 error!("The network connection has failed!");
-                return false;
+                return true;
             }
         };
-        true
+        error!("The error was not processed!");
+        false
     }
 }
 
@@ -196,7 +199,9 @@ impl Instance {
                     }
                 } else {
                     if let Err(mut e) = self.parse_request(&msg) {
+                        warn!("Error encountered in processing request ({}) ", e);
                         if e.process(self, msg.client_id) {
+                            error!("Critical error encountered, must quit! ({})", e);
                             return;
                         }
                     }
@@ -209,26 +214,30 @@ impl Instance {
     fn parse_request(&mut self, msg: &Request) -> Result<(), RequestError> {
         trace!("Processing request");
         match msg.field_type {
-            Request_RequestType::SHUTDOWN => {}
-            Request_RequestType::AUTHENTICATE => {}
-            Request_RequestType::TRANSACTIONS => {}
+            Request_RequestType::SHUTDOWN => unimplemented!(),
+            Request_RequestType::AUTHENTICATE => unimplemented!(),
+            Request_RequestType::TRANSACTIONS => unimplemented!(),
             Request_RequestType::ACCOUNT => match msg.detailed_type {
                 Some(Request_oneof_detailed_type::account(Request_AccountType::LIST_ACCOUNTS)) => {
+                    trace!("Starting get all accounts");
                     return self.get_all_accounts(&msg);
                 }
                 Some(Request_oneof_detailed_type::account(Request_AccountType::ACCOUNT_INFO)) => {
+                    trace!("Starting get detailed info");
                     return self.get_account_info(&msg);
                 }
 
                 Some(Request_oneof_detailed_type::account(Request_AccountType::NEW_ACCOUNT)) => {
+                    trace!("Starting new account creation");
                     return self.new_account(msg);
                 }
 
-                Some(_) | None => {}
+                Some(_) | None => info!("Has not matched any functions"),
             },
-            Request_RequestType::MISC => {}
-            Request_RequestType::Result => {}
+            Request_RequestType::MISC => unimplemented!(),
+            Request_RequestType::Result => unimplemented!(),
         }
+        warn!("Nothing was executed");
         Ok(())
     }
     fn send_incorrect_arguments_error(&mut self, client_id: String) -> Result<(), RequestError> {
@@ -372,6 +381,13 @@ impl Instance {
         };
     }
     fn get_account_info(&mut self, msg: &Request) -> Result<(), RequestError> {
+        info!(
+            "Retrieving account info for account ({:?}) and user {:?}",
+            msg.data
+                .get(0)
+                .ok_or(RequestError::new(ErrorKind::InvalidArguments))?,
+            msg.user_id
+        );
         let account = self.database_connection.get_bank_account(
             msg.data[0]
                 .parse()
@@ -395,12 +411,18 @@ impl Instance {
     }
 
     fn get_all_accounts(&mut self, msg: &Request) -> Result<(), RequestError> {
+        info!("Listing accounts for user {:?}", msg.user_id);
         let user_uuid = msg
             .user_id
             .parse()
             .map_err(|e| RequestError::new(ErrorKind::InvalidArguments))?;
         let accounts = self.database_connection.get_all_bank_accounts(user_uuid)?;
         let account_str = serde_json::to_string(&accounts).unwrap();
+        trace!(
+            "Retrieved {} accounts, producing a json of {}",
+            accounts.len(),
+            &account_str
+        );
         let mut data = Vec::new();
         data.push(account_str);
         self.network_server
@@ -413,16 +435,26 @@ impl Instance {
         Ok(())
     }
     fn new_account(&mut self, msg: &Request) -> Result<(), RequestError> {
-        let account_str = msg
+        info!("Creating account for user {:?}", msg.user_id);
+        /*let account_str = msg
             .data
             .get(0)
             .ok_or(RequestError::new(ErrorKind::InvalidArguments))?;
+        */
+        warn!("Creating dummy 'simple_account'!");
         let mut account: Account = Account::simple_account();
         account.user_uuid = msg
             .user_id
             .parse()
             .map_err(|_e| RequestError::new(ErrorKind::NotAuthenticated))?;
         self.database_connection.new_bank_account(&account)?;
+        self.network_server
+            .send_message(Request::success_result(
+                Vec::new(),
+                String::from(&msg.client_id),
+                Request_ResultType::SUCCESS,
+            ))
+            .map_err(|e| RequestError::new(ErrorKind::NetworkFailure))?;
         Ok(())
     }
 }

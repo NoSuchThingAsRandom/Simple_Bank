@@ -105,13 +105,12 @@ impl InputLoop {
         if choice == String::from("login") {
             self.login();
         } else {
-            self.new_account();
+            self.new_user_account();
         }
         loop {
             match Commands::get_user_command() {
                 Commands::List_Accounts => {
-                    println!("Enter the message to send: ");
-                    let msg: String = read!("{}\n");
+                    self.list_accounts();
                 }
                 Commands::Account_Info => {
                     self.account_info();
@@ -179,7 +178,7 @@ impl InputLoop {
         }
     }
 
-    fn new_account(&mut self) {
+    fn new_user_account(&mut self) {
         println!("Enter your username: ");
         let username: String = read!("{}\n");
 
@@ -244,6 +243,7 @@ impl InputLoop {
             Default::default(),
             true,
             Request_RequestType::ACCOUNT,
+            &self.token,
             Some(Request_oneof_detailed_type::account(
                 Request_AccountType::NEW_ACCOUNT,
             )),
@@ -266,6 +266,7 @@ impl InputLoop {
             Default::default(),
             true,
             Request_RequestType::ACCOUNT,
+            &self.token,
             Some(Request_oneof_detailed_type::account(
                 Request_AccountType::LIST_ACCOUNTS,
             )),
@@ -274,11 +275,12 @@ impl InputLoop {
         self.server_connection.send_message(request).unwrap();
         if let Some(data) = InputLoop::process_result(self.server_connection.get_singular_message())
         {
+            println!("{:?}", &data);
             println!("Accounts: ");
             println!("Account Number        Balance     ");
-            for account_str in data {
-                let account: Account = serde_json::from_str(&account_str).unwrap();
-                println!("{}", account);
+            let accounts: Vec<Account> = serde_json::from_str(data.get(0).unwrap()).unwrap();
+            for account_str in accounts {
+                println!("{}", account_str);
             }
         }
     }
