@@ -22,6 +22,19 @@ table! {
 }
 
 table! {
+    transactions (transaction_id) {
+        transaction_id -> Uuid,
+        user_responsible -> Uuid,
+        time_issued -> Timestamp,
+        amount -> Numeric,
+        source_sort_code -> Int4,
+        source_account_number -> Int4,
+        dest_sort_code -> Int4,
+        dest_account_number -> Int4,
+    }
+}
+
+table! {
     user_details (user_uuid) {
         user_uuid -> Uuid,
         username -> Text,
@@ -33,4 +46,9 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(bank_accounts, tokens, user_details,);
+allow_tables_to_appear_in_same_query!(
+    bank_accounts,
+    tokens,
+    transactions,
+    user_details,
+);

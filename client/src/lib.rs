@@ -7,16 +7,14 @@ extern crate strum;
 extern crate strum_macros;
 
 use std::convert::TryFrom;
-use std::fmt;
 use std::str::FromStr;
-use std::sync::mpsc::{channel, Receiver, Sender};
 
-use log::{error, info, trace, warn};
+use log::{info, trace, warn};
 use protobuf::RepeatedField;
-use structs::models::{Account, User};
+use structs::models::{Account, Transaction, User};
 use structs::protos::message::{
     Request, Request_AccountType, Request_AuthenticateType, Request_RequestType,
-    Request_ResultType, Request_oneof_detailed_type,
+    Request_ResultType, Request_TransactionType, Request_oneof_detailed_type,
 };
 use strum::EnumMessage;
 use strum::IntoEnumIterator;
@@ -34,18 +32,35 @@ enum Commands {
         message = "List_Accounts",
         detailed_message = "This list all your bank accounts"
     )]
-    List_Accounts,
+    ListAccounts,
+
+    #[strum(
+        message = "List_All_Transactions",
+        detailed_message = "This list all your transactions"
+    )]
+    ListAllTransactions,
+
+    #[strum(
+        message = "List_Account_Transactions",
+        detailed_message = "This list all your transactions for an account"
+    )]
+    ListAccountTransactions,
+    #[strum(
+        message = "New_Transaction",
+        detailed_message = "This will create a new transaction"
+    )]
+    CreateTransaction,
     #[strum(
         message = "Create_Account",
         detailed_message = "This will create a account"
     )]
-    Create_Account,
+    CreateAccount,
 
     #[strum(
         message = "Account_Info",
         detailed_message = "This provides detailed information about an account"
     )]
-    Account_Info,
+    AccountInfo,
 
     #[strum(message = "Exit", detailed_message = "This exits the program")]
     Exit,
@@ -109,18 +124,40 @@ impl InputLoop {
         }
         loop {
             match Commands::get_user_command() {
-                Commands::List_Accounts => {
+                Commands::ListAccounts => {
                     self.list_accounts();
                 }
-                Commands::Account_Info => {
+                Commands::AccountInfo => {
                     self.account_info();
                 }
                 Commands::Exit => {
                     println!("Goodbye!");
                     return;
                 }
-                Commands::Create_Account => {
+                Commands::CreateAccount => {
                     self.new_bank_account();
+                }
+                Commands::ListAllTransactions => {
+                    println!("Listing all accounts");
+                    self.get_transactions(
+                        Vec::new(),
+                        Request_oneof_detailed_type::transaction(
+                            Request_TransactionType::LIST_ALL_TRANSACTIONS,
+                        ),
+                    );
+                }
+                Commands::ListAccountTransactions => {
+                    println!("Enter the account number: ");
+                    let account_number: String = read!("{}\n");
+                    self.get_transactions(
+                        vec![account_number],
+                        Request_oneof_detailed_type::transaction(
+                            Request_TransactionType::LIST_ACCOUNT_TRANSACTIONS,
+                        ),
+                    );
+                }
+                Commands::CreateTransaction => {
+                    self.create_transaction();
                 }
             }
         }
@@ -192,7 +229,7 @@ impl InputLoop {
         let dob_str: String = read!("{}\n");
         let dob = match chrono::NaiveDate::parse_from_str(&dob_str, "%d %m %Y") {
             Ok(dob) => dob,
-            Err(E) => {
+            Err(_) => {
                 println!("Invalid date format\nExiting user creation");
                 return;
             }
@@ -208,7 +245,7 @@ impl InputLoop {
         };
         let user_string = match serde_json::to_string(&user) {
             Ok(user_str) => user_str,
-            Err(E) => {
+            Err(_) => {
                 println!("Failed to process given data\nExiting user creation");
                 return;
             }
@@ -277,12 +314,60 @@ impl InputLoop {
         {
             println!("{:?}", &data);
             println!("Accounts: ");
-            println!("Account Number        Balance     ");
             let accounts: Vec<Account> = serde_json::from_str(data.get(0).unwrap()).unwrap();
             for account_str in accounts {
-                println!("{}", account_str);
+                println!("\n\n{}", account_str);
             }
         }
+    }
+
+    fn get_transactions(&mut self, data: Vec<String>, request_type: Request_oneof_detailed_type) {
+        let request = Request::new_from_fields(
+            data,
+            Default::default(),
+            true,
+            Request_RequestType::TRANSACTIONS,
+            &self.token,
+            Some(request_type),
+        )
+        .unwrap();
+        self.server_connection.send_message(request).unwrap();
+        if let Some(data) = InputLoop::process_result(self.server_connection.get_singular_message())
+        {
+            println!("{:?}", &data);
+            println!("Transactions: ");
+            let transactions: Vec<Transaction> =
+                serde_json::from_str(data.get(0).unwrap()).unwrap();
+            for transaction_str in transactions {
+                println!("\n\n{}", transaction_str);
+            }
+        }
+        //TODO Need to change to error
+    }
+
+    fn create_transaction(&mut self) {
+        println!("Enter the source account number: ");
+        let source_account_number: String = read!("{}\n");
+
+        println!("Enter the destination account number: ");
+        let dest_account_number: String = read!("{}\n");
+
+        println!("Enter the amount: ");
+        let amount: String = read!("{}\n");
+        let data = vec![source_account_number, dest_account_number, amount];
+        let request = Request::new_from_fields(
+            data,
+            Default::default(),
+            true,
+            Request_RequestType::TRANSACTIONS,
+            &self.token,
+            Some(Request_oneof_detailed_type::transaction(
+                Request_TransactionType::NEW_TRANSACTION,
+            )),
+        )
+        .unwrap();
+        self.server_connection.send_message(request).unwrap();
+        InputLoop::process_result(self.server_connection.get_singular_message());
     }
 
     fn process_result(request: Request) -> Option<Vec<String>> {

@@ -7,11 +7,11 @@ pub mod models;
 pub mod protos;
 pub mod schema;
 
-use crate::models::Account;
+use crate::models::{Account, Transaction};
 use protos::message::{
     Request, Request_RequestType, Request_ResultType, Request_oneof_detailed_type,
 };
-use rand::{RngCore, SeedableRng};
+use rand::{Rng, RngCore, SeedableRng};
 use std::fmt;
 use uuid::{Builder, Uuid, Variant, Version};
 
@@ -100,19 +100,29 @@ impl fmt::Display for Account {
 impl Account {
     pub fn simple_account() -> Account {
         Account {
-            account_number: 12345678,
+            account_number: rand::thread_rng().gen_range(10000000, 99999999),
             user_uuid: Default::default(),
-            balance: bigdecimal::FromPrimitive::from_i64(0).unwrap(),
+            balance: bigdecimal::FromPrimitive::from_i64(100).unwrap(),
             sort_code: 123456,
             interest_rate: bigdecimal::FromPrimitive::from_f64(1.0).unwrap(),
-            overdraft_limit: bigdecimal::FromPrimitive::from_i64(0).unwrap(),
+            overdraft_limit: bigdecimal::FromPrimitive::from_i64(50).unwrap(),
             account_name: None,
             account_category: None,
             archived: false,
         }
     }
 }
-
+impl fmt::Display for Transaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Source Account:    {}\n\
+             Dest Account:      {}\n\
+             Amount:            {}",
+            self.source_account_number, self.dest_account_number, self.amount
+        )
+    }
+}
 #[cfg(test)]
 mod tests {
     #[test]

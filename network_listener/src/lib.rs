@@ -4,16 +4,14 @@ mod crypto;
 mod network_worker;
 mod server_connection;
 
-use structs::protos::message::{
-    Request, Request_RequestType, Request_ResultType, Request_oneof_detailed_type,
-};
+use structs::protos::message::{Request, Request_RequestType};
 
 use std::sync::mpsc::{channel, Receiver, SendError, Sender};
 use std::thread;
 
-use log::{error, info, warn};
-use rand::{RngCore, SeedableRng};
-use uuid::{Builder, Uuid, Variant, Version};
+use log::{info, warn};
+
+use uuid::Uuid;
 
 pub const ADDRESS: &str = "127.0.0.1:";
 pub const DATA_MISC_PORT: &str = "49700";

@@ -33,9 +33,10 @@ message Request {
         LOGOUT=3;
     }
     enum TransactionType {
-        LIST_TRANSACTIONS = 0;
-        TRANSACTION_INFO = 1;
-        NEW_TRANSACTION = 2;
+        LIST_ALL_TRANSACTIONS = 0;
+        LIST_ACCOUNT_TRANSACTIONS = 1;
+        TRANSACTION_INFO = 2;
+        NEW_TRANSACTION = 3;
     }
 
     enum AccountType {

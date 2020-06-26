@@ -8,7 +8,7 @@ extern crate structs;
 
 use dotenv::dotenv;
 use std::{env, fmt};
-use structs::models::{Account, Token, User};
+use structs::models::{Account, Token, Transaction, User};
 use structs::schema;
 
 use log::{error, info, trace, warn};
@@ -20,6 +20,7 @@ use uuid::{Builder, Uuid, Variant, Version};
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use serde::export::Formatter;
+use std::io::ErrorKind;
 
 //TODO Is it worth requiring a token for every request (In the database)
 //TODO Even though it should be authenticated from load_balancer?
@@ -55,6 +56,10 @@ impl fmt::Display for DatabaseError {
             ),
             DatabaseErrorKind::Unknown => write!(f, "Unknown failure"),
             DatabaseErrorKind::NotFound => write!(f, "The record was not found!"),
+            DatabaseErrorKind::InvalidArguments => write!(
+                f,
+                "Invalid arguments were provided (Could be account does not have enough money",
+            ),
         }
     }
 }
@@ -73,6 +78,7 @@ pub enum DatabaseErrorKind {
     NotFound,
     AlreadyExists,
     DatabaseFailure,
+    InvalidArguments,
     Unknown,
 }
 
@@ -422,7 +428,7 @@ impl DbConnection {
     ///
     /// let user = connection.get_user_account(user_uuid).unwrap();
     /// ```
-    /// #Error
+    /// # Error
     ///     Err(NotFound) - No user with that uuid found
     pub fn get_user_uuid(&mut self, username: &String) -> QueryResult<Uuid> {
         schema::user_details::table
@@ -442,8 +448,6 @@ impl DbConnection {
     ///
     /// let user = connection.get_user_account(user_uuid).unwrap();
     /// ```
-    /// #Error
-    ///     Err(NotFound) - No user with that uuid found
     pub fn get_user_account(&mut self, user_uuid: uuid::Uuid) -> QueryResult<User> {
         schema::user_details::table
             .find(user_uuid)
@@ -466,8 +470,9 @@ impl DbConnection {
     ///
     /// let user = connection.get_bank_account(account_number,user_uuid).unwrap();
     /// ```
-    /// #Error
+    /// # Error
     ///     Err(NotFound) - No account with that number found
+    ///     Err(DatabaseFailure) - An error occured with the database
     pub fn get_bank_account(
         &mut self,
         account_number: i32,
@@ -505,8 +510,9 @@ impl DbConnection {
     ///
     /// let user = connection.get_bank_account(account_number,user_uuid).unwrap();
     /// ```
-    /// #Error
+    /// # Error
     ///     Err(NotFound) - No account with that number found
+    ///     Err(DatabaseFailure) - An error occured with the database
     pub fn get_all_bank_accounts(
         &mut self,
         user_uuid: Uuid,
@@ -524,6 +530,221 @@ impl DbConnection {
                 }
             }
         }
+    }
+
+    /// Finds a transaction by it's unique identifier
+    ///
+    /// # Examples
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let transaction_id: uuid::Uuid ="some_uuid".parse().unwrap();
+    /// let mut connection = DbConnection::new_connection();
+    ///
+    /// let transasction = connection.get_transaction_by_uuid(transaction_id).unwrap();
+    /// ```
+    /// # Error
+    ///     Err(NotFound) - No user with that uuid found
+    ///     Err(DatabaseFailure) - An error occured with the database
+    pub fn get_transaction_by_uuid(
+        &mut self,
+        transaction_id: uuid::Uuid,
+    ) -> Result<Transaction, DatabaseError> {
+        trace!("Retrieving transaction by id ({})", transaction_id);
+        match schema::transactions::table
+            .find(transaction_id)
+            .get_result(&self.connection)
+        {
+            Ok(transaction) => Ok(transaction),
+            Err(e) => {
+                if e == diesel::result::Error::NotFound {
+                    Err(DatabaseError::new(DatabaseErrorKind::NotFound))
+                } else {
+                    Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
+                }
+            }
+        }
+    }
+
+    /// Finds all transactions executed by the given user
+    ///
+    /// # Examples
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let user_id: uuid::Uuid ="some_uuid".parse().unwrap();
+    /// let mut connection = DbConnection::new_connection();
+    ///
+    /// let transactions = connection.get_transaction_by_uuid(user_id).unwrap();
+    /// ```
+    /// # Error
+    ///     Err(NotFound) - No user with that uuid found
+    ///     Err(DatabaseFailure) - An error occured with the database
+    pub fn get_transaction_by_user(
+        &mut self,
+        user_uuid: uuid::Uuid,
+    ) -> Result<Vec<Transaction>, DatabaseError> {
+        trace!("Retrieving all transactions by user ({})", user_uuid);
+        match schema::transactions::table
+            .filter(schema::transactions::user_responsible.eq(user_uuid))
+            .load::<Transaction>(&self.connection)
+        {
+            Ok(account) => Ok(account),
+            Err(e) => {
+                if e == diesel::result::Error::NotFound {
+                    Err(DatabaseError::new(DatabaseErrorKind::NotFound))
+                } else {
+                    Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
+                }
+            }
+        }
+    }
+
+    /// Finds all transactions for a given bank account
+    ///
+    /// # Examples
+    /// ```
+    /// use database_handler::DbConnection;
+    ///
+    /// let account_id = 123456;
+    /// let mut connection = DbConnection::new_connection();
+    ///
+    /// let transactions = connection.get_transaction_by_account(account_id).unwrap();
+    /// ```
+    /// # Error
+    ///     Err(NotFound) - No user with that uuid found
+    ///     Err(DatabaseFailure) - An error occured with the database
+    pub fn get_transaction_by_account(
+        &mut self,
+        account_id: i32,
+    ) -> Result<Vec<Transaction>, DatabaseError> {
+        trace!(
+            "Retrieving all transactions by bank account ({})",
+            account_id
+        );
+        match schema::transactions::table
+            .filter(schema::transactions::source_account_number.eq(account_id))
+            .or_filter(schema::transactions::dest_account_number.eq(account_id))
+            .load::<Transaction>(&self.connection)
+        {
+            Ok(account) => Ok(account),
+            Err(e) => {
+                if e == diesel::result::Error::NotFound {
+                    Err(DatabaseError::new(DatabaseErrorKind::NotFound))
+                } else {
+                    Err(DatabaseError::new(DatabaseErrorKind::DatabaseFailure))
+                }
+            }
+        }
+    }
+
+    ///Transfers money between two internal accounts, if the user uuid matches the source account
+    ///
+    /// # Examples
+    /// ```
+    ///     use database_handler::DbConnection;
+    ///     use std::str::FromStr;
+    ///
+    ///     let amount=bigdecimal::BigDecimal::from(5.0);
+    ///     let source_account_id = 123456;
+    ///     let source_user_uuid = uuid::Uuid::from_str(&"Some uuid").unwrap();
+    ///     let dest_account_id = 123457;
+    ///     
+    ///     let mut connection =DbConnection::new_connection();
+    ///     let result = connection.create_internal_transaction(source_account_id,dest_account_id,source_user_uuid,amount);
+    ///     match result{
+    ///         Ok(_) => println!("The transaction was completed successfully "),
+    ///         Err(e)=> println!("Failed to create transaction, error ({}) " ,e)
+    ///     }   
+    ///     
+    /// ```
+    ///
+    /// # Errors
+    ///     Err(NotFound) => At least one of the accounts do not exist
+    ///     Err(InvalidArguments) => There is not enough money in the source account
+    pub fn create_internal_transaction(
+        &mut self,
+        source_account_number: i32,
+        dest_account_number: i32,
+        user_uuid: uuid::Uuid,
+        transaction_amount: bigdecimal::BigDecimal,
+    ) -> Result<(), DatabaseError> {
+        trace!(
+            "Transferring ({}) from account ({}) to account ({})",
+            transaction_amount,
+            source_account_number,
+            dest_account_number
+        );
+        if transaction_amount < bigdecimal::BigDecimal::from(0) {
+            return Err(DatabaseError::new(DatabaseErrorKind::InvalidArguments));
+        }
+        let source_sort_code: i32;
+        let dest_sort_code: i32;
+        let source_balance: bigdecimal::BigDecimal;
+        let dest_balance: bigdecimal::BigDecimal;
+
+        //Check source account exists, and matches user uuid
+        match schema::bank_accounts::table
+            .filter(schema::bank_accounts::account_number.eq(source_account_number))
+            .filter(schema::bank_accounts::user_uuid.eq(user_uuid))
+            .first::<Account>(&self.connection)
+        {
+            Ok(account) => {
+                if &account.balance + &account.overdraft_limit < transaction_amount {
+                    return Err(DatabaseError::new(DatabaseErrorKind::InvalidArguments));
+                }
+                source_balance = account.balance - &transaction_amount;
+                source_sort_code = account.sort_code;
+            }
+            Err(_) => {
+                return Err(DatabaseError::new(DatabaseErrorKind::NotFound));
+            }
+        }
+
+        //Check destination account exists
+        match schema::bank_accounts::table
+            .filter(schema::bank_accounts::account_number.eq(dest_account_number))
+            .first::<Account>(&self.connection)
+        {
+            Ok(account) => {
+                dest_balance = account.balance + &transaction_amount;
+                dest_sort_code = account.sort_code;
+            }
+            Err(_) => return Err(DatabaseError::new(DatabaseErrorKind::NotFound)),
+        }
+        trace!("Updating balances");
+        //Update balances
+        DbConnection::check_query_processed(
+            diesel::update(
+                schema::bank_accounts::table
+                    .filter(schema::bank_accounts::account_number.eq(source_account_number)),
+            )
+            .set(schema::bank_accounts::balance.eq(source_balance))
+            .execute(&self.connection),
+        )?;
+        DbConnection::check_query_processed(
+            diesel::update(
+                schema::bank_accounts::table
+                    .filter(schema::bank_accounts::account_number.eq(dest_account_number)),
+            )
+            .set(schema::bank_accounts::balance.eq(dest_balance))
+            .execute(&self.connection),
+        )?;
+        let transaction = Transaction {
+            transaction_id: new_secure_uuid_v4(),
+            user_responsible: user_uuid,
+            time_issued: chrono::Utc::now().naive_utc(),
+            amount: transaction_amount,
+            source_sort_code,
+            source_account_number,
+            dest_sort_code,
+            dest_account_number,
+        };
+        DbConnection::check_query_processed(
+            diesel::insert_into(schema::transactions::table)
+                .values(&transaction)
+                .execute(&mut self.connection),
+        )
     }
 
     /// Sets the archive flag on a user account, so that it can no longer be modified

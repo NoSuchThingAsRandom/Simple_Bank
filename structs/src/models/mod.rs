@@ -1,4 +1,4 @@
-use super::schema::{bank_accounts, tokens, user_details};
+use super::schema::{bank_accounts, tokens, transactions, user_details};
 use serde::{Deserialize, Serialize};
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
 #[table_name = "user_details"]
@@ -44,4 +44,16 @@ pub struct Token {
     pub client_uuid: uuid::Uuid,
     pub start_date: chrono::NaiveDateTime,
     pub expiry_date: chrono::NaiveDateTime,
+}
+#[derive(Queryable, Insertable, Serialize, Deserialize)]
+#[table_name = "transactions"]
+pub struct Transaction {
+    pub transaction_id: uuid::Uuid,
+    pub user_responsible: uuid::Uuid,
+    pub time_issued: chrono::NaiveDateTime,
+    pub amount: bigdecimal::BigDecimal,
+    pub source_sort_code: i32,
+    pub source_account_number: i32,
+    pub dest_sort_code: i32,
+    pub dest_account_number: i32,
 }

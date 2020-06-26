@@ -11,14 +11,12 @@ use log::trace;
 use log::warn;
 use structs::models::{Account, User};
 use structs::protos::message::{
-    Request, Request_AccountType, Request_AuthenticateType, Request_MiscType, Request_RequestType,
+    Request, Request_AccountType, Request_AuthenticateType, Request_RequestType,
     Request_ResultType, Request_TransactionType, Request_oneof_detailed_type,
 };
 
 use database_handler::{DatabaseError, DatabaseErrorKind};
-use network_listener::{
-    Client, ADDRESS, DATA_ACCOUNTS_PORT, DATA_MISC_PORT, DATA_TRANSACTIONS_PORT, LOAD_BALANCER_PORT,
-};
+use network_listener::{ADDRESS, LOAD_BALANCER_PORT};
 
 struct RequestError {
     error_kind: ErrorKind,
@@ -41,11 +39,11 @@ impl RequestError {
             }
 
             ErrorKind::DatabaseFailure => {
-                instance.send_critical_error(client_id);
+                instance.send_critical_error(client_id).unwrap();
                 panic!("The database has crashed!");
             }
             ErrorKind::Shutdown => {
-                instance.send_critical_error(client_id);
+                instance.send_critical_error(client_id).unwrap();
                 instance.database_connection.close();
                 return true;
             }
@@ -57,13 +55,11 @@ impl RequestError {
                 return false;
             }
             ErrorKind::NetworkFailure => {
-                instance.send_critical_error(client_id);
+                instance.send_critical_error(client_id).unwrap();
                 error!("The network connection has failed!");
                 return true;
             }
         };
-        error!("The error was not processed!");
-        false
     }
 }
 
@@ -80,6 +76,7 @@ impl From<database_handler::DatabaseError> for RequestError {
             DatabaseErrorKind::DatabaseFailure => RequestError::new(ErrorKind::DatabaseFailure),
             DatabaseErrorKind::Unknown => RequestError::new(ErrorKind::DatabaseFailure),
             DatabaseErrorKind::NotFound => RequestError::new(ErrorKind::InvalidArguments),
+            DatabaseErrorKind::InvalidArguments => RequestError::new(ErrorKind::InvalidArguments),
         }
     }
 }
@@ -216,7 +213,27 @@ impl Instance {
         match msg.field_type {
             Request_RequestType::SHUTDOWN => unimplemented!(),
             Request_RequestType::AUTHENTICATE => unimplemented!(),
-            Request_RequestType::TRANSACTIONS => unimplemented!(),
+            Request_RequestType::TRANSACTIONS => match msg.detailed_type {
+                Some(Request_oneof_detailed_type::transaction(
+                    Request_TransactionType::LIST_ALL_TRANSACTIONS,
+                )) => {
+                    trace!("Starting get all transactions");
+                    return self.get_all_transactions(&msg);
+                }
+                Some(Request_oneof_detailed_type::transaction(
+                    Request_TransactionType::LIST_ACCOUNT_TRANSACTIONS,
+                )) => {
+                    trace!("Starting get all account transactions");
+                    return self.get_account_transactions(&msg);
+                }
+                Some(Request_oneof_detailed_type::transaction(
+                    Request_TransactionType::NEW_TRANSACTION,
+                )) => {
+                    trace!("Starting create transaction");
+                    return self.create_transaction(&msg);
+                }
+                Some(_) | None => warn!("Did not match any function"),
+            },
             Request_RequestType::ACCOUNT => match msg.detailed_type {
                 Some(Request_oneof_detailed_type::account(Request_AccountType::LIST_ACCOUNTS)) => {
                     trace!("Starting get all accounts");
@@ -232,7 +249,7 @@ impl Instance {
                     return self.new_account(msg);
                 }
 
-                Some(_) | None => info!("Has not matched any functions"),
+                Some(_) | None => warn!("Did not match any function"),
             },
             Request_RequestType::MISC => unimplemented!(),
             Request_RequestType::Result => unimplemented!(),
@@ -240,6 +257,7 @@ impl Instance {
         warn!("Nothing was executed");
         Ok(())
     }
+
     fn send_incorrect_arguments_error(&mut self, client_id: String) -> Result<(), RequestError> {
         let request = Request::success_result(
             Vec::new(),
@@ -264,7 +282,6 @@ impl Instance {
             Ok(())
         }
     }
-
     fn send_critical_error(&mut self, client_id: String) -> Result<(), RequestError> {
         let request =
             Request::success_result(Vec::new(), client_id, Request_ResultType::UNEXPECTED_ERROR);
@@ -273,6 +290,19 @@ impl Instance {
         } else {
             Ok(())
         }
+    }
+    fn send_successful_request(
+        &mut self,
+        data: Vec<String>,
+        client_id: &String,
+    ) -> Result<(), RequestError> {
+        self.network_server
+            .send_message(Request::success_result(
+                data,
+                String::from(client_id),
+                Request_ResultType::SUCCESS,
+            ))
+            .map_err(|_| RequestError::new(ErrorKind::NetworkFailure))
     }
 
     fn send_login_request(&mut self, msg: &Request) -> Result<(), RequestError> {
@@ -318,8 +348,8 @@ impl Instance {
         );
         self.network_server
             .send_message(success_request)
-            .map_err(|e| RequestError::new(ErrorKind::NetworkFailure))?;
-        info!("Succesfully created user");
+            .map_err(|_| RequestError::new(ErrorKind::NetworkFailure))?;
+        info!("Successfully created user");
         Ok(())
     }
 
@@ -357,7 +387,7 @@ impl Instance {
         };
         self.network_server
             .send_message(result)
-            .map_err(|e| RequestError::new(ErrorKind::NetworkFailure))?;
+            .map_err(|_| RequestError::new(ErrorKind::NetworkFailure))?;
 
         Ok(())
     }
@@ -377,7 +407,7 @@ impl Instance {
                 msg.user_id = uuid;
                 Ok(())
             }
-            Err(e) => Err(RequestError::new(ErrorKind::InvalidArguments)),
+            Err(_) => Err(RequestError::new(ErrorKind::InvalidArguments)),
         };
     }
     fn get_account_info(&mut self, msg: &Request) -> Result<(), RequestError> {
@@ -401,13 +431,7 @@ impl Instance {
             serde_json::to_string(&account)
                 .map_err(|_e| RequestError::new(ErrorKind::InvalidArguments))?,
         );
-        self.network_server
-            .send_message(Request::success_result(
-                data,
-                msg.client_id.clone(),
-                Request_ResultType::SUCCESS,
-            ))
-            .map_err(|_e| RequestError::new(ErrorKind::NetworkFailure))
+        self.send_successful_request(data, &msg.client_id)
     }
 
     fn get_all_accounts(&mut self, msg: &Request) -> Result<(), RequestError> {
@@ -415,7 +439,7 @@ impl Instance {
         let user_uuid = msg
             .user_id
             .parse()
-            .map_err(|e| RequestError::new(ErrorKind::InvalidArguments))?;
+            .map_err(|_| RequestError::new(ErrorKind::InvalidArguments))?;
         let accounts = self.database_connection.get_all_bank_accounts(user_uuid)?;
         let account_str = serde_json::to_string(&accounts).unwrap();
         trace!(
@@ -423,16 +447,7 @@ impl Instance {
             accounts.len(),
             &account_str
         );
-        let mut data = Vec::new();
-        data.push(account_str);
-        self.network_server
-            .send_message(Request::success_result(
-                data,
-                msg.client_id.clone(),
-                Request_ResultType::SUCCESS,
-            ))
-            .map_err(|e| RequestError::new(ErrorKind::NetworkFailure))?;
-        Ok(())
+        self.send_successful_request(vec![account_str], &msg.client_id)
     }
     fn new_account(&mut self, msg: &Request) -> Result<(), RequestError> {
         info!("Creating account for user {:?}", msg.user_id);
@@ -448,13 +463,78 @@ impl Instance {
             .parse()
             .map_err(|_e| RequestError::new(ErrorKind::NotAuthenticated))?;
         self.database_connection.new_bank_account(&account)?;
-        self.network_server
-            .send_message(Request::success_result(
-                Vec::new(),
-                String::from(&msg.client_id),
-                Request_ResultType::SUCCESS,
-            ))
-            .map_err(|e| RequestError::new(ErrorKind::NetworkFailure))?;
-        Ok(())
+        self.send_successful_request(Vec::new(), &msg.client_id)
+    }
+
+    fn get_account_transactions(&mut self, msg: &Request) -> Result<(), RequestError> {
+        info!("Retrieving transactions for account");
+        let account_id: i32 = msg
+            .data
+            .get(0)
+            .ok_or(RequestError::new(ErrorKind::InvalidArguments))?
+            .parse()
+            .map_err(|_| RequestError::new(ErrorKind::InvalidArguments))?;
+        info!("Account number is {}", account_id);
+        let transactions = self
+            .database_connection
+            .get_transaction_by_account(account_id)?;
+        let transaction_str = serde_json::to_string(&transactions).unwrap();
+        trace!(
+            "Retrieved {} transactions, producing a json of {}",
+            transactions.len(),
+            &transaction_str
+        );
+        self.send_successful_request(vec![transaction_str], &msg.client_id)
+    }
+    fn get_all_transactions(&mut self, msg: &Request) -> Result<(), RequestError> {
+        info!("Retrieving transactions for user");
+        let user_uuid = msg
+            .user_id
+            .parse()
+            .map_err(|_| RequestError::new(ErrorKind::InvalidArguments))?;
+        info!("User uuid is {}", user_uuid);
+        let transactions = self
+            .database_connection
+            .get_transaction_by_user(user_uuid)?;
+        let transaction_str = serde_json::to_string(&transactions).unwrap();
+        trace!(
+            "Retrieved {} transactions, producing a json of {}",
+            transactions.len(),
+            &transaction_str
+        );
+        self.send_successful_request(vec![transaction_str], &msg.client_id)
+    }
+
+    fn create_transaction(&mut self, msg: &Request) -> Result<(), RequestError> {
+        info!("Creating new transaction");
+        let source_account_id: i32 = msg
+            .data
+            .get(0)
+            .ok_or(RequestError::new(ErrorKind::InvalidArguments))?
+            .parse()
+            .map_err(|_| RequestError::new(ErrorKind::InvalidArguments))?;
+        let dest_account_id: i32 = msg
+            .data
+            .get(1)
+            .ok_or(RequestError::new(ErrorKind::InvalidArguments))?
+            .parse()
+            .map_err(|_| RequestError::new(ErrorKind::InvalidArguments))?;
+        let amount = msg
+            .data
+            .get(2)
+            .ok_or(RequestError::new(ErrorKind::InvalidArguments))?
+            .parse()
+            .map_err(|_| RequestError::new(ErrorKind::InvalidArguments))?;
+        let user_uuid = msg
+            .user_id
+            .parse()
+            .map_err(|_| RequestError::new(ErrorKind::InvalidArguments))?;
+        self.database_connection.create_internal_transaction(
+            source_account_id,
+            dest_account_id,
+            user_uuid,
+            amount,
+        )?;
+        self.send_successful_request(Vec::new(), &msg.client_id)
     }
 }
